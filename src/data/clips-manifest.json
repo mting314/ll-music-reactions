@@ -1,0 +1,42 @@
+[
+  {
+    "id": "clip-01",
+    "name": "Mind Blown",
+    "tags": ["shocked", "amazed", "surprised"],
+    "filename": "mind-blown.mp4",
+    "thumbnailFilename": "mind-blown.jpg",
+    "durationMs": 3000
+  },
+  {
+    "id": "clip-02",
+    "name": "Vibing",
+    "tags": ["happy", "grooving", "enjoying"],
+    "filename": "vibing.mp4",
+    "thumbnailFilename": "vibing.jpg",
+    "durationMs": 4000
+  },
+  {
+    "id": "clip-03",
+    "name": "Crying",
+    "tags": ["emotional", "sad", "tears", "moved"],
+    "filename": "crying.mp4",
+    "thumbnailFilename": "crying.jpg",
+    "durationMs": 3500
+  },
+  {
+    "id": "clip-04",
+    "name": "Hyped",
+    "tags": ["excited", "pumped", "energetic"],
+    "filename": "hyped.mp4",
+    "thumbnailFilename": "hyped.jpg",
+    "durationMs": 3000
+  },
+  {
+    "id": "clip-05",
+    "name": "Speechless",
+    "tags": ["stunned", "silent", "awe"],
+    "filename": "speechless.mp4",
+    "thumbnailFilename": "speechless.jpg",
+    "durationMs": 3000
+  }
+]
