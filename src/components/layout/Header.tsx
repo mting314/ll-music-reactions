@@ -2,6 +2,10 @@ interface HeaderProps {
   onLoadSetlist: () => void;
   onPreview: () => void;
   onExport: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   hasEntries: boolean;
 }
 
@@ -9,6 +13,10 @@ export function Header({
   onLoadSetlist,
   onPreview,
   onExport,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   hasEntries,
 }: HeaderProps) {
   return (
@@ -18,6 +26,24 @@ export function Header({
       </h1>
 
       <div className="flex gap-3">
+        <div className="flex gap-1 border-r border-gray-700 pr-3">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            className="rounded px-2 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Undo"
+          >
+            ↩
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            className="rounded px-2 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Redo"
+          >
+            ↪
+          </button>
+        </div>
         <button
           onClick={onLoadSetlist}
           className="rounded px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
