@@ -1,42 +1,198 @@
 [
   {
     "id": "clip-01",
-    "name": "Mind Blown",
-    "tags": ["shocked", "amazed", "surprised"],
-    "filename": "mind-blown.mp4",
-    "thumbnailFilename": "mind-blown.jpg",
-    "durationMs": 3000
+    "name": "Let's Go",
+    "tags": [
+      "anticipation",
+      "rubbing-hands",
+      "ready",
+      "excited"
+    ],
+    "filename": "clip-01.mp4",
+    "thumbnailFilename": "clip-01.jpg",
+    "durationMs": 1800
   },
   {
     "id": "clip-02",
-    "name": "Vibing",
-    "tags": ["happy", "grooving", "enjoying"],
-    "filename": "vibing.mp4",
-    "thumbnailFilename": "vibing.jpg",
-    "durationMs": 4000
+    "name": "Not Feeling It",
+    "tags": [
+      "disappointed",
+      "frown",
+      "unimpressed",
+      "meh"
+    ],
+    "filename": "clip-02.mp4",
+    "thumbnailFilename": "clip-02.jpg",
+    "durationMs": 1733
   },
   {
     "id": "clip-03",
-    "name": "Crying",
-    "tags": ["emotional", "sad", "tears", "moved"],
-    "filename": "crying.mp4",
-    "thumbnailFilename": "crying.jpg",
-    "durationMs": 3500
+    "name": "Gasp",
+    "tags": [
+      "shocked",
+      "gasp",
+      "hand-over-mouth",
+      "surprised"
+    ],
+    "filename": "clip-03.mp4",
+    "thumbnailFilename": "clip-03.jpg",
+    "durationMs": 1800
   },
   {
     "id": "clip-04",
-    "name": "Hyped",
-    "tags": ["excited", "pumped", "energetic"],
-    "filename": "hyped.mp4",
-    "thumbnailFilename": "hyped.jpg",
-    "durationMs": 3000
+    "name": "Bored",
+    "tags": [
+      "bored",
+      "looking-down",
+      "unimpressed",
+      "neutral"
+    ],
+    "filename": "clip-04.mp4",
+    "thumbnailFilename": "clip-04.jpg",
+    "durationMs": 1767
   },
   {
     "id": "clip-05",
-    "name": "Speechless",
-    "tags": ["stunned", "silent", "awe"],
-    "filename": "speechless.mp4",
-    "thumbnailFilename": "speechless.jpg",
-    "durationMs": 3000
+    "name": "Freaking Out",
+    "tags": [
+      "screaming",
+      "freaking-out",
+      "amazed",
+      "hype"
+    ],
+    "filename": "clip-05.mp4",
+    "thumbnailFilename": "clip-05.jpg",
+    "durationMs": 1800
+  },
+  {
+    "id": "clip-06",
+    "name": "Blank Stare",
+    "tags": [
+      "deadpan",
+      "blank",
+      "stare",
+      "emotionless"
+    ],
+    "filename": "clip-06.mp4",
+    "thumbnailFilename": "clip-06.jpg",
+    "durationMs": 1767
+  },
+  {
+    "id": "clip-07",
+    "name": "Praise",
+    "tags": [
+      "arms-up",
+      "praising",
+      "feeling-it",
+      "vibing"
+    ],
+    "filename": "clip-07.mp4",
+    "thumbnailFilename": "clip-07.jpg",
+    "durationMs": 1766
+  },
+  {
+    "id": "clip-08",
+    "name": "Losing It",
+    "tags": [
+      "crazy",
+      "grin",
+      "losing-it",
+      "wild",
+      "close-up"
+    ],
+    "filename": "clip-08.mp4",
+    "thumbnailFilename": "clip-08.jpg",
+    "durationMs": 1767
+  },
+  {
+    "id": "clip-09",
+    "name": "Wiping Tear",
+    "tags": [
+      "emotional",
+      "wiping-tear",
+      "moved",
+      "touched"
+    ],
+    "filename": "clip-09.mp4",
+    "thumbnailFilename": "clip-09.jpg",
+    "durationMs": 1867
+  },
+  {
+    "id": "clip-10",
+    "name": "Ugly Crying",
+    "tags": [
+      "crying",
+      "ugly-crying",
+      "emotional",
+      "tears"
+    ],
+    "filename": "clip-10.mp4",
+    "thumbnailFilename": "clip-10.jpg",
+    "durationMs": 1833
+  },
+  {
+    "id": "clip-11",
+    "name": "Blessed",
+    "tags": [
+      "praying",
+      "blessed",
+      "grateful",
+      "hands-together"
+    ],
+    "filename": "clip-11.mp4",
+    "thumbnailFilename": "clip-11.jpg",
+    "durationMs": 1767
+  },
+  {
+    "id": "clip-12",
+    "name": "Can't Believe It",
+    "tags": [
+      "hand-on-head",
+      "disbelief",
+      "overwhelmed",
+      "stunned"
+    ],
+    "filename": "clip-12.mp4",
+    "thumbnailFilename": "clip-12.jpg",
+    "durationMs": 1833
+  },
+  {
+    "id": "clip-13",
+    "name": "Thinking",
+    "tags": [
+      "thinking",
+      "chin-on-fist",
+      "contemplating",
+      "hmm"
+    ],
+    "filename": "clip-13.mp4",
+    "thumbnailFilename": "clip-13.jpg",
+    "durationMs": 1800
+  },
+  {
+    "id": "clip-14",
+    "name": "Savoring",
+    "tags": [
+      "savoring",
+      "eyes-closed",
+      "in-the-zone",
+      "peaceful"
+    ],
+    "filename": "clip-14.mp4",
+    "thumbnailFilename": "clip-14.jpg",
+    "durationMs": 1833
+  },
+  {
+    "id": "clip-15",
+    "name": "Jaw Drop",
+    "tags": [
+      "jaw-drop",
+      "awestruck",
+      "mouth-open",
+      "mind-blown"
+    ],
+    "filename": "clip-15.mp4",
+    "thumbnailFilename": "clip-15.jpg",
+    "durationMs": 1487
   }
 ]
