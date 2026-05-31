@@ -93,6 +93,7 @@ function SortableEntry({
             alt=""
             className="h-8 w-8 shrink-0 rounded object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
           />
         )}
         <span className="min-w-0 flex-1 truncate text-xs text-gray-300">

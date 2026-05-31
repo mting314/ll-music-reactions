@@ -85,6 +85,7 @@ export function SongPicker({
                         alt=""
                         className="h-10 w-10 shrink-0 rounded object-cover"
                         loading="lazy"
+                        referrerPolicy="no-referrer"
                       />
                     )}
                     <div className="min-w-0 flex-1">
