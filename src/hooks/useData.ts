@@ -80,10 +80,10 @@ export function getAlbumArtUrl(
   song: Song,
   discographyMap: Map<string, Discography>,
 ): string | null {
-  const firstDiscId = song.discographyIds[0];
+  const firstDiscId = song.discographyIds?.[0];
   if (firstDiscId == null) return null;
   const disc = discographyMap.get(String(firstDiscId));
   if (!disc) return null;
-  const imageUrl = disc.versions[0]?.imageUrl;
+  const imageUrl = disc.versions?.[0]?.imageUrl;
   return imageUrl ?? null;
 }
