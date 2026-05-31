@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "bun run server/export.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
