@@ -23,6 +23,7 @@ export function useSetlist() {
         id: uuidv4(),
         clipId: null,
         songId: item.songId,
+        songStartTime: null,
       }));
   };
 

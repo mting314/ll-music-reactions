@@ -93,6 +93,7 @@ export interface TimelineEntry {
   id: string;
   clipId: string | null;
   songId: string | null;
+  songStartTime: number | null;
 }
 
 export interface ExportSettings {

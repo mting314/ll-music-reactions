@@ -20,6 +20,7 @@ export function PreviewPlayer({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const validEntries = entries.filter((e) => e.clipId && e.songId);
 
@@ -33,24 +34,59 @@ export function PreviewPlayer({
   const currentArtUrl = currentSong
     ? getAlbumArtUrl(currentSong, discographyMap)
     : null;
+  const currentAudioUrl = currentSong?.wikiAudioUrl ?? null;
+  const currentStartTime = currentEntry?.songStartTime ?? 0;
 
   const playNext = useCallback(() => {
     if (currentIndex < validEntries.length - 1) {
       setCurrentIndex((i) => i + 1);
     } else {
       setIsPlaying(false);
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     }
   }, [currentIndex, validEntries.length]);
 
   useEffect(() => {
-    if (isPlaying && videoRef.current) {
-      videoRef.current.play().catch(() => {});
+    if (!isPlaying) return;
+    videoRef.current?.play().catch(() => {});
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const tryPlay = () => {
+      audio.currentTime = currentStartTime;
+      audio.play().catch(() => {});
+    };
+
+    if (audio.readyState >= 2) {
+      tryPlay();
+    } else {
+      audio.addEventListener('canplay', tryPlay, { once: true });
+      return () => audio.removeEventListener('canplay', tryPlay);
     }
-  }, [currentIndex, isPlaying]);
+  }, [currentIndex, isPlaying, currentStartTime]);
+
+  useEffect(() => {
+    if (!isPlaying && audioRef.current) {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
 
   const handlePlay = () => {
     setIsPlaying(true);
     videoRef.current?.play().catch(() => {});
+    if (audioRef.current) {
+      audioRef.current.currentTime = currentStartTime;
+      audioRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleClose = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    onClose();
   };
 
   if (validEntries.length === 0) {
@@ -76,13 +112,13 @@ export function PreviewPlayer({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
       <div className="relative w-full max-w-2xl">
         <button
-          onClick={onClose}
+          onClick={handleClose}
           className="absolute -top-10 right-0 text-gray-400 hover:text-white text-xl"
         >
           &times; Close
         </button>
 
-        <div className="relative aspect-video overflow-hidden rounded-xl bg-black">
+        <div className="relative aspect-[9/16] max-h-[70vh] overflow-hidden rounded-xl bg-black mx-auto">
           {currentClip && (
             <video
               ref={videoRef}
@@ -93,12 +129,23 @@ export function PreviewPlayer({
             />
           )}
 
+          {currentAudioUrl && (
+            <audio
+              ref={audioRef}
+              key={'audio-' + currentIndex}
+              src={currentAudioUrl}
+              preload="auto"
+              crossOrigin="anonymous"
+            />
+          )}
+
           {currentArtUrl && (
-            <div className="absolute right-4 top-4">
+            <div className="absolute right-3 top-3">
               <img
                 src={currentArtUrl}
                 alt=""
-                className="h-20 w-20 rounded-lg shadow-lg"
+                className="h-64 w-64 rounded-lg shadow-lg border border-white/20"
+                referrerPolicy="no-referrer"
               />
             </div>
           )}
