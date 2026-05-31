@@ -4,13 +4,16 @@ import { Timeline } from '@/components/timeline/Timeline';
 import { SongPicker } from '@/components/song-picker/SongPicker';
 import { ClipPicker } from '@/components/clip-picker/ClipPicker';
 import { SetlistLoader } from '@/components/setlist/SetlistLoader';
+import { EntryList } from '@/components/entry-list/EntryList';
 import { PreviewPlayer } from '@/components/preview/PreviewPlayer';
-import { ExportDialog } from '@/components/export/ExportDialog';
+import { ExportPanel } from '@/components/export/ExportPanel';
 import { useTimeline } from '@/hooks/useTimeline';
+import { useVideoExport } from '@/hooks/useVideoExport';
 import {
   useSongs,
   useArtistMap,
   useDiscographyMap,
+  useClips,
   useSeries,
 } from '@/hooks/useData';
 
@@ -19,16 +22,18 @@ type PickerMode =
   | { type: 'song'; entryId: string }
   | { type: 'clip'; entryId: string }
   | { type: 'setlist' }
-  | { type: 'preview' }
-  | { type: 'export' };
+  | { type: 'preview' };
 
 export default function App() {
   const songs = useSongs();
   const artistMap = useArtistMap();
   const discographyMap = useDiscographyMap();
+  const clips = useClips();
   const series = useSeries();
   const timeline = useTimeline();
+  const videoExport = useVideoExport();
   const [picker, setPicker] = useState<PickerMode>({ type: 'none' });
+  const [showExport, setShowExport] = useState(false);
 
   const songMap = new Map(songs.map((s) => [s.id, s]));
 
@@ -56,7 +61,11 @@ export default function App() {
       <Header
         onLoadSetlist={() => setPicker({ type: 'setlist' })}
         onPreview={() => setPicker({ type: 'preview' })}
-        onExport={() => setPicker({ type: 'export' })}
+        onExport={() => setShowExport(true)}
+        onUndo={timeline.undo}
+        onRedo={timeline.redo}
+        canUndo={timeline.canUndo}
+        canRedo={timeline.canRedo}
         hasEntries={timeline.entries.length > 0}
       />
 
@@ -83,9 +92,9 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex flex-1 flex-col items-center justify-center p-8">
+        <div className="flex flex-1 flex-col items-center overflow-y-auto p-8">
           {timeline.entries.length === 0 ? (
-            <div className="text-center">
+            <div className="flex flex-1 flex-col items-center justify-center text-center">
               <h2 className="mb-4 text-2xl font-bold text-white">
                 LL Music Reactions
               </h2>
@@ -113,9 +122,18 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <p className="text-gray-500">
-              Select an entry below to assign a song or clip
-            </p>
+            <EntryList
+              entries={timeline.entries}
+              songMap={songMap}
+              discographyMap={discographyMap}
+              clips={clips}
+              onPickSong={(entryId) => setPicker({ type: 'song', entryId })}
+              onPickClip={(entryId) => setPicker({ type: 'clip', entryId })}
+              onRemove={timeline.removeEntry}
+              onUpdateStartTime={(entryId, time) =>
+                timeline.updateEntry(entryId, { songStartTime: time })
+              }
+            />
           )}
         </div>
       </main>
@@ -147,12 +165,15 @@ export default function App() {
         />
       )}
 
-      {picker.type === 'export' && (
-        <ExportDialog
-          entries={timeline.entries}
-          songMap={songMap}
-          discographyMap={discographyMap}
-          onClose={() => setPicker({ type: 'none' })}
+      {(showExport || videoExport.isExporting) && (
+        <ExportPanel
+          validCount={timeline.entries.filter((e) => e.clipId && e.songId).length}
+          isExporting={videoExport.isExporting}
+          error={videoExport.error}
+          onStartExport={(settings) =>
+            videoExport.startExport(timeline.entries, songMap, discographyMap, settings)
+          }
+          onDismiss={() => setShowExport(false)}
         />
       )}
     </div>
