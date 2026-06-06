@@ -170,6 +170,8 @@ export default function App() {
           validCount={timeline.entries.filter((e) => e.clipId && e.songId).length}
           isExporting={videoExport.isExporting}
           error={videoExport.error}
+          status={videoExport.status}
+          elapsedMs={videoExport.elapsedMs}
           onStartExport={(settings) =>
             videoExport.startExport(timeline.entries, songMap, discographyMap, settings)
           }

@@ -1,18 +1,40 @@
 import { useState } from 'react';
 import type { ExportSettings } from '@/types';
+import type { ExportStatus } from '@/hooks/useVideoExport';
 
 interface ExportPanelProps {
   validCount: number;
   isExporting: boolean;
   error: string | null;
+  status: ExportStatus | null;
+  elapsedMs: number;
   onStartExport: (settings: ExportSettings) => void;
   onDismiss: () => void;
 }
+
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatMB(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+const PHASE_LABEL: Record<ExportStatus['phase'], string> = {
+  preparing: 'Preparing export',
+  encoding: 'Stitching clips on the cloud',
+  downloading: 'Downloading your video',
+};
 
 export function ExportPanel({
   validCount,
   isExporting,
   error,
+  status,
+  elapsedMs,
   onStartExport,
   onDismiss,
 }: ExportPanelProps) {
@@ -106,14 +128,65 @@ export function ExportPanel({
           </>
         )}
 
-        {isExporting && (
-          <div className="py-2 text-center">
-            <div className="mb-2 h-2 overflow-hidden rounded-full bg-gray-800">
-              <div className="h-full w-full animate-pulse rounded-full bg-pink-600" />
-            </div>
-            <p className="text-xs text-gray-400">
-              Encoding on the cloud...
-            </p>
+        {isExporting && status && (
+          <div className="py-1">
+            {(() => {
+              const determinate =
+                status.phase === 'downloading' && status.totalBytes;
+              const pct = determinate
+                ? Math.min(
+                    100,
+                    Math.round((status.receivedBytes / status.totalBytes!) * 100),
+                  )
+                : null;
+
+              return (
+                <>
+                  <div className="mb-1 flex items-baseline justify-between">
+                    <span className="text-xs font-medium text-white">
+                      {PHASE_LABEL[status.phase]}…
+                    </span>
+                    <span className="font-mono text-[11px] text-gray-500">
+                      {formatElapsed(elapsedMs)}
+                    </span>
+                  </div>
+
+                  <div className="mb-2 h-2 overflow-hidden rounded-full bg-gray-800">
+                    {pct !== null ? (
+                      <div
+                        className="h-full rounded-full bg-pink-600 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    ) : (
+                      <div className="h-full w-full animate-pulse rounded-full bg-pink-600" />
+                    )}
+                  </div>
+
+                  <p className="text-xs text-gray-400">
+                    {status.phase === 'downloading' ? (
+                      <>
+                        {formatMB(status.receivedBytes)}
+                        {status.totalBytes
+                          ? ` of ${formatMB(status.totalBytes)}`
+                          : ''}
+                      </>
+                    ) : (
+                      <>
+                        {status.entryCount}{' '}
+                        {status.entryCount === 1 ? 'clip' : 'clips'} at{' '}
+                        {status.resolution}
+                      </>
+                    )}
+                  </p>
+
+                  {status.phase === 'encoding' && (
+                    <p className="mt-1 text-[11px] text-gray-600">
+                      The first export can take a few extra seconds to warm up.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
