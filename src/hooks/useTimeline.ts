@@ -24,15 +24,6 @@ export function useTimeline() {
   const historyRef = useRef<TimelineEntry[][]>([]);
   const redoRef = useRef<TimelineEntry[][]>([]);
 
-  const persist = useCallback((next: TimelineEntry[]) => {
-    setEntries((prev) => {
-      historyRef.current = [...historyRef.current.slice(-MAX_HISTORY), prev];
-      redoRef.current = [];
-      return next;
-    });
-    saveToStorage(next);
-  }, []);
-
   const undo = useCallback(() => {
     const prev = historyRef.current.pop();
     if (prev === undefined) return;

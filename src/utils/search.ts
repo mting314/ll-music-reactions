@@ -5,7 +5,6 @@ export interface SearchableItem {
   name: string;
   englishName?: string;
   phoneticName?: string;
-  [key: string]: unknown;
 }
 
 function stripPunctuation(str: string): string {
