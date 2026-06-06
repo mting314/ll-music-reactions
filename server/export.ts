@@ -4,6 +4,8 @@ import { tmpdir } from "os";
 import {
   buildFfmpegArgs,
   buildFilterComplex,
+  parseProgressMs,
+  progressPercent,
   type ExportRequest,
   type InputMap,
 } from "./ffmpeg";
@@ -24,6 +26,17 @@ function log(severity: Severity, message: string, fields: Record<string, unknown
   console.log(JSON.stringify({ severity, message, ...fields }));
 }
 
+// Progress events streamed to the client over SSE.
+type ExportEvent =
+  | { type: "start"; entries: number; resolution: string }
+  | { type: "asset"; index: number; total: number; song: string; artOk: boolean; audioOk: boolean }
+  | { type: "ffmpeg_start"; totalMs: number }
+  | { type: "ffmpeg_progress"; pct: number | null; outMs: number }
+  | { type: "done"; bytes: number; dataB64: string }
+  | { type: "error"; message: string };
+
+type Emit = (event: ExportEvent) => void;
+
 async function downloadFile(url: string, dest: string): Promise<boolean> {
   try {
     const resp = await fetch(url);
@@ -35,7 +48,11 @@ async function downloadFile(url: string, dest: string): Promise<boolean> {
   }
 }
 
-async function runExport(req: ExportRequest, requestId: string): Promise<string> {
+async function runExport(
+  req: ExportRequest,
+  requestId: string,
+  emit: Emit,
+): Promise<string> {
   const workDir = await mkdtemp(join(tmpdir(), "ll-export-"));
   const outputPath = join(workDir, "output.mp4");
 
@@ -93,6 +110,14 @@ async function runExport(req: ExportRequest, requestId: string): Promise<string>
       artResolved: artIdx !== null,
       audioResolved: audioIdx !== null,
     });
+    emit({
+      type: "asset",
+      index: i,
+      total: req.entries.length,
+      song: entry.songName,
+      artOk: artIdx !== null,
+      audioOk: audioIdx !== null,
+    });
 
     inputMap.push({ clipIdx, artIdx, audioIdx });
   }
@@ -100,13 +125,44 @@ async function runExport(req: ExportRequest, requestId: string): Promise<string>
   const filterStr = buildFilterComplex(req, inputMap);
   const ffmpegArgs = buildFfmpegArgs(inputArgs, filterStr, outputPath);
 
-  log("INFO", "export.ffmpeg.start", { requestId, args: ffmpegArgs.join(" ") });
+  // Total output duration ≈ sum of clip lengths; used to turn ffmpeg's elapsed
+  // out_time into a percentage. 0 when clients don't send durations.
+  const totalMs = req.entries.reduce((sum, e) => sum + (e.durationMs ?? 0), 0);
+
+  log("INFO", "export.ffmpeg.start", { requestId, totalMs, args: ffmpegArgs.join(" ") });
+  emit({ type: "ffmpeg_start", totalMs });
   const startedAt = Date.now();
 
   const proc = Bun.spawn(ffmpegArgs, { stdout: "pipe", stderr: "pipe" });
-  // Always drain stderr (ffmpeg is chatty) so we have it for diagnostics and
-  // never risk a full-pipe stall.
+
+  // Read ffmpeg's -progress output from stdout and emit throttled progress.
+  const pump = (async () => {
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let lastEmit = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        const outMs = parseProgressMs(line);
+        if (outMs === null) continue;
+        const now = Date.now();
+        if (now - lastEmit >= 400) {
+          lastEmit = now;
+          emit({ type: "ffmpeg_progress", pct: progressPercent(outMs, totalMs), outMs });
+        }
+      }
+    }
+  })();
+
+  // Drain stderr for diagnostics; await both before checking exit.
   const stderr = await new Response(proc.stderr).text();
+  await pump;
   const exitCode = await proc.exited;
   const ffmpegMs = Date.now() - startedAt;
 
@@ -135,6 +191,38 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// Stream SSE `data:` frames while `run` does the work. Errors mid-stream are
+// delivered as an `error` event (the HTTP status is already 200 by then).
+function sseResponse(requestId: string, run: (emit: Emit) => Promise<void>): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit: Emit = (event) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      try {
+        await run(emit);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log("ERROR", "export.failed", { requestId, error: message });
+        emit({ type: "error", message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Request-Id": requestId,
+      ...CORS_HEADERS,
+    },
+  });
+}
+
 const server = Bun.serve({
   port: PORT,
   // ffmpeg jobs can run long; lift Bun's default idle timeout to the max.
@@ -153,23 +241,38 @@ const server = Bun.serve({
 
     if (req.method === "POST" && pathname === "/export") {
       const requestId = crypto.randomUUID();
-      const startedAt = Date.now();
+
+      // Parse before streaming so a bad payload is a normal JSON 400.
+      let body: ExportRequest;
       try {
-        const body = (await req.json()) as ExportRequest;
-        log("INFO", "export.start", {
-          requestId,
+        body = (await req.json()) as ExportRequest;
+      } catch {
+        return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+        });
+      }
+
+      const startedAt = Date.now();
+      log("INFO", "export.start", {
+        requestId,
+        entries: body.entries.length,
+        resolution: body.resolution,
+        overlayPosition: body.overlayPosition,
+      });
+
+      return sseResponse(requestId, async (emit) => {
+        emit({
+          type: "start",
           entries: body.entries.length,
           resolution: body.resolution,
-          overlayPosition: body.overlayPosition,
         });
 
-        const outputPath = await runExport(body, requestId);
-        const file = Bun.file(outputPath);
-        const data = await file.arrayBuffer();
+        const outputPath = await runExport(body, requestId, emit);
+        const data = await Bun.file(outputPath).arrayBuffer();
 
-        // Clean up after reading
-        const workDir = join(outputPath, "..");
-        rm(workDir, { recursive: true }).catch(() => {});
+        // Clean up the temp dir once read.
+        rm(join(outputPath, ".."), { recursive: true }).catch(() => {});
 
         log("INFO", "export.done", {
           requestId,
@@ -177,36 +280,14 @@ const server = Bun.serve({
           bytes: data.byteLength,
         });
 
-        return new Response(data, {
-          headers: {
-            "Content-Type": "video/mp4",
-            "Content-Disposition":
-              'attachment; filename="ll-music-reactions.mp4"',
-            "X-Request-Id": requestId,
-            ...CORS_HEADERS,
-          },
+        // Deliver the finished MP4 as the final event (base64 inflates ~33%,
+        // fine for the <25MB Discord target).
+        emit({
+          type: "done",
+          bytes: data.byteLength,
+          dataB64: Buffer.from(data).toString("base64"),
         });
-      } catch (err) {
-        log("ERROR", "export.failed", {
-          requestId,
-          totalMs: Date.now() - startedAt,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return new Response(
-          JSON.stringify({
-            error: err instanceof Error ? err.message : "Export failed",
-            requestId,
-          }),
-          {
-            status: 500,
-            headers: {
-              "Content-Type": "application/json",
-              "X-Request-Id": requestId,
-              ...CORS_HEADERS,
-            },
-          },
-        );
-      }
+      });
     }
 
     return new Response("Not found", { status: 404, headers: CORS_HEADERS });

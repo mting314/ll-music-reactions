@@ -51,7 +51,14 @@ The frontend targets the export service via `VITE_EXPORT_API`:
 - **Development** (`bun dev`) — unset, falls back to `http://localhost:3001`
 - **Production** (`bun run build`) — read from `.env.production` (the Cloud Run URL)
 
-Endpoints: `POST /export` (returns an MP4) and `GET /health`.
+Endpoints:
+
+- `POST /export` — streams **Server-Sent Events** with real progress while it
+  works (`start` → `asset` per entry → `ffmpeg_start` → `ffmpeg_progress` →
+  `done`), delivering the finished MP4 as base64 in the final `done` event.
+  Errors arrive as an `error` event. Running the work inside the streamed
+  request keeps Cloud Run's CPU allocated and avoids any shared job state.
+- `GET /health` — readiness check.
 
 ## Data
 

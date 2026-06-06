@@ -19,14 +19,11 @@ function formatElapsed(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function formatMB(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
-}
-
 const PHASE_LABEL: Record<ExportStatus['phase'], string> = {
   preparing: 'Preparing export',
+  assets: 'Fetching album art & audio',
   encoding: 'Stitching clips on the cloud',
-  downloading: 'Downloading your video',
+  finalizing: 'Finalizing your video',
 };
 
 export function ExportPanel({
@@ -131,14 +128,25 @@ export function ExportPanel({
         {isExporting && status && (
           <div className="py-1">
             {(() => {
-              const determinate =
-                status.phase === 'downloading' && status.totalBytes;
-              const pct = determinate
-                ? Math.min(
-                    100,
-                    Math.round((status.receivedBytes / status.totalBytes!) * 100),
-                  )
-                : null;
+              // Determinate bar only while ffmpeg reports a real percentage.
+              const pct =
+                status.phase === 'encoding' && status.encodePct !== null
+                  ? status.encodePct
+                  : null;
+              const warming =
+                status.phase === 'preparing' ||
+                (status.phase === 'encoding' && status.encodePct === null);
+
+              let detail: string;
+              if (status.phase === 'assets') {
+                detail = `Media ${status.assetIndex} of ${status.assetTotal}`;
+              } else if (pct !== null) {
+                detail = `${pct}% encoded`;
+              } else {
+                detail = `${status.entryCount} ${
+                  status.entryCount === 1 ? 'clip' : 'clips'
+                } at ${status.resolution}`;
+              }
 
               return (
                 <>
@@ -162,24 +170,9 @@ export function ExportPanel({
                     )}
                   </div>
 
-                  <p className="text-xs text-gray-400">
-                    {status.phase === 'downloading' ? (
-                      <>
-                        {formatMB(status.receivedBytes)}
-                        {status.totalBytes
-                          ? ` of ${formatMB(status.totalBytes)}`
-                          : ''}
-                      </>
-                    ) : (
-                      <>
-                        {status.entryCount}{' '}
-                        {status.entryCount === 1 ? 'clip' : 'clips'} at{' '}
-                        {status.resolution}
-                      </>
-                    )}
-                  </p>
+                  <p className="text-xs text-gray-400">{detail}</p>
 
-                  {status.phase === 'encoding' && (
+                  {warming && (
                     <p className="mt-1 text-[11px] text-gray-600">
                       The first export can take a few extra seconds to warm up.
                     </p>

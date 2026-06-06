@@ -12,19 +12,34 @@ const EXPORT_BASE =
   import.meta.env.VITE_EXPORT_API ?? 'http://localhost:3001';
 const EXPORT_API = `${EXPORT_BASE.replace(/\/$/, '')}/export`;
 
-// Observable phases of an export. The server does the asset-download + ffmpeg
-// work opaquely inside a single request, so "encoding" covers that whole
-// window; we report the transitions we can actually see plus a live timer.
-export type ExportPhase = 'preparing' | 'encoding' | 'downloading';
+// Phases reported by the server's SSE progress stream.
+export type ExportPhase = 'preparing' | 'assets' | 'encoding' | 'finalizing';
 
 export interface ExportStatus {
   phase: ExportPhase;
   entryCount: number;
   resolution: ExportSettings['resolution'];
-  // Bytes of the resulting MP4 received so far (downloading phase only).
-  receivedBytes: number;
-  // Total size if the server sent Content-Length, else null (unknown).
-  totalBytes: number | null;
+  // assets phase: which entry's media is being fetched (1-based).
+  assetIndex: number;
+  assetTotal: number;
+  // encoding phase: ffmpeg percent, or null when duration is unknown.
+  encodePct: number | null;
+}
+
+// Events the server streams (mirror of the server's ExportEvent union).
+type ServerEvent =
+  | { type: 'start'; entries: number; resolution: ExportSettings['resolution'] }
+  | { type: 'asset'; index: number; total: number; song: string; artOk: boolean; audioOk: boolean }
+  | { type: 'ffmpeg_start'; totalMs: number }
+  | { type: 'ffmpeg_progress'; pct: number | null; outMs: number }
+  | { type: 'done'; bytes: number; dataB64: string }
+  | { type: 'error'; message: string };
+
+function base64ToBlob(b64: string, type: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
 }
 
 export function useVideoExport() {
@@ -50,8 +65,9 @@ export function useVideoExport() {
         phase: 'preparing',
         entryCount: validEntries.length,
         resolution: settings.resolution,
-        receivedBytes: 0,
-        totalBytes: null,
+        assetIndex: 0,
+        assetTotal: validEntries.length,
+        encodePct: null,
       });
 
       // Live elapsed-time ticker so the panel never looks frozen.
@@ -72,12 +88,9 @@ export function useVideoExport() {
             songStartTime: entry.songStartTime ?? 0,
             songName: song?.name ?? 'Unknown',
             clipName: clip.name,
+            durationMs: clip.durationMs,
           };
         });
-
-        // Server is now working (downloading assets + running ffmpeg) until the
-        // response headers arrive.
-        setStatus((s) => (s ? { ...s, phase: 'encoding' } : s));
 
         const resp = await fetch(EXPORT_API, {
           method: 'POST',
@@ -89,33 +102,66 @@ export function useVideoExport() {
           }),
         });
 
-        if (!resp.ok) {
+        if (!resp.ok || !resp.body) {
           const body = await resp.json().catch(() => ({}));
           throw new Error(body.error || `Server error ${resp.status}`);
         }
 
-        // Stream the MP4 back so we can show real download progress.
-        const totalBytes = Number(resp.headers.get('Content-Length')) || null;
-        setStatus((s) => (s ? { ...s, phase: 'downloading', totalBytes } : s));
+        // Parse the SSE stream: frames are separated by a blank line, each
+        // carrying one `data: <json>` line.
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let resultB64: string | null = null;
 
-        let blob: Blob;
-        if (resp.body) {
-          const reader = resp.body.getReader();
-          const chunks: Uint8Array[] = [];
-          let received = 0;
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            received += value.length;
-            setStatus((s) => (s ? { ...s, receivedBytes: received } : s));
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+
+          let sep: number;
+          while ((sep = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+
+            const dataLine = frame
+              .split('\n')
+              .find((l) => l.startsWith('data:'));
+            if (!dataLine) continue;
+
+            const event = JSON.parse(dataLine.slice(5).trim()) as ServerEvent;
+
+            if (event.type === 'error') throw new Error(event.message);
+            if (event.type === 'done') {
+              resultB64 = event.dataB64;
+              setStatus((s) => (s ? { ...s, phase: 'finalizing' } : s));
+              continue;
+            }
+
+            setStatus((s) => {
+              if (!s) return s;
+              switch (event.type) {
+                case 'asset':
+                  return {
+                    ...s,
+                    phase: 'assets',
+                    assetIndex: event.index + 1,
+                    assetTotal: event.total,
+                  };
+                case 'ffmpeg_start':
+                  return { ...s, phase: 'encoding', encodePct: 0 };
+                case 'ffmpeg_progress':
+                  return { ...s, phase: 'encoding', encodePct: event.pct };
+                default:
+                  return s;
+              }
+            });
           }
-          blob = new Blob(chunks as BlobPart[], { type: 'video/mp4' });
-        } else {
-          // Fallback for environments without a readable stream.
-          blob = await resp.blob();
         }
 
+        if (!resultB64) throw new Error('Export ended without a result');
+
+        const blob = base64ToBlob(resultB64, 'video/mp4');
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
