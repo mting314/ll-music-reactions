@@ -8,6 +8,9 @@ export interface ExportEntry {
   songStartTime: number;
   songName: string;
   clipName: string;
+  // Clip length in ms; summed across entries to estimate ffmpeg progress.
+  // Optional so older payloads still work (progress just stays indeterminate).
+  durationMs?: number;
 }
 
 export interface ExportRequest {
@@ -27,6 +30,10 @@ export interface InputMap {
 }
 
 const MARGIN = 20;
+
+// Uniform audio format applied to every stream so concat segments line up.
+const AUDIO_FORMAT =
+  "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo";
 
 export function resolutionScale(resolution: ExportRequest["resolution"]): string {
   return resolution === "720p" ? "1280:720" : "854:480";
@@ -69,8 +76,10 @@ export function buildFilterComplex(
     const map = inputMap[i]!;
     const entry = req.entries[i]!;
 
+    // setsar=1 normalizes the pixel aspect ratio; concat requires identical
+    // SAR across segments, and source clips vary (e.g. 1:1 vs 1220:1221).
     filterParts.push(
-      `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=decrease,pad=${scale}:-1:-1:color=black[scaled${i}]`,
+      `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=decrease,pad=${scale}:-1:-1:color=black,setsar=1[scaled${i}]`,
     );
 
     if (map.artIdx !== null) {
@@ -84,18 +93,23 @@ export function buildFilterComplex(
       filterParts.push(`[scaled${i}]copy[v${i}]`);
     }
 
+    // Normalize every audio stream to one format before concat. ffmpeg's
+    // concat filter requires identical sample format / rate / channel layout
+    // across segments; without this, stricter ffmpeg builds (8.x) fail with
+    // "received no packets" when clips differ.
     if (map.audioIdx !== null) {
       const startT = entry.songStartTime;
+      filterParts.push(`[${map.clipIdx}:a]${AUDIO_FORMAT}[clipa${i}]`);
       filterParts.push(
-        `[${map.audioIdx}:a]atrim=${startT}:${startT + 3},asetpts=PTS-STARTPTS[songtrim${i}]`,
+        `[${map.audioIdx}:a]atrim=${startT}:${startT + 3},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[songtrim${i}]`,
       );
       filterParts.push(
-        `[${map.clipIdx}:a][songtrim${i}]amix=inputs=2:duration=shortest[a${i}]`,
+        `[clipa${i}][songtrim${i}]amix=inputs=2:duration=shortest,${AUDIO_FORMAT}[a${i}]`,
       );
-      concatInputs.push(`[v${i}][a${i}]`);
     } else {
-      concatInputs.push(`[v${i}][${map.clipIdx}:a]`);
+      filterParts.push(`[${map.clipIdx}:a]${AUDIO_FORMAT}[a${i}]`);
     }
+    concatInputs.push(`[v${i}][a${i}]`);
   }
 
   filterParts.push(
@@ -114,6 +128,11 @@ export function buildFfmpegArgs(
   return [
     "ffmpeg",
     "-y",
+    // Machine-readable progress to stdout (fd 1); suppress the chatty stats
+    // lines on stderr so it stays useful for error diagnostics.
+    "-progress",
+    "pipe:1",
+    "-nostats",
     ...inputArgs,
     "-filter_complex",
     filterStr,
@@ -135,4 +154,25 @@ export function buildFfmpegArgs(
     "+faststart",
     outputPath,
   ];
+}
+
+// `ffmpeg -progress pipe:1` emits blocks of key=value lines, e.g.
+//   out_time_us=1234567
+//   progress=continue
+// Returns the elapsed output time in milliseconds for a line, else null.
+export function parseProgressMs(line: string): number | null {
+  // out_time_us is microseconds and is the reliable field across versions.
+  const us = line.match(/^out_time_us=(\d+)/);
+  if (us) return Number(us[1]) / 1000;
+  // out_time_ms is mislabelled (microseconds) in some builds; treat the same.
+  const ms = line.match(/^out_time_ms=(\d+)/);
+  if (ms) return Number(ms[1]) / 1000;
+  return null;
+}
+
+// Clamp a fraction (current/total) to an integer 0..99 percent. We never
+// report 100 from progress lines — completion is signalled by the process exit.
+export function progressPercent(currentMs: number, totalMs: number): number | null {
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return null;
+  return Math.max(0, Math.min(99, Math.round((currentMs / totalMs) * 100)));
 }

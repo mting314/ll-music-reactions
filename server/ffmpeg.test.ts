@@ -4,6 +4,8 @@ import {
   buildFilterComplex,
   overlayCoords,
   overlaySize,
+  parseProgressMs,
+  progressPercent,
   resolutionScale,
   type ExportRequest,
   type InputMap,
@@ -72,18 +74,22 @@ describe("buildFilterComplex", () => {
     const filter = buildFilterComplex(req, inputMap);
 
     expect(filter).toContain(
-      "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:-1:-1:color=black[scaled0]",
+      "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:-1:-1:color=black,setsar=1[scaled0]",
     );
     expect(filter).toContain("[1:v]scale=180:180[artscaled0]");
     expect(filter).toContain(
       "[scaled0][artscaled0]overlay=W-180-20:20[v0]",
     );
-    // songStartTime=30 -> trim 30:33 (3s window)
+    // clip audio normalized to a uniform format before mixing
     expect(filter).toContain(
-      "[2:a]atrim=30:33,asetpts=PTS-STARTPTS[songtrim0]",
+      "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[clipa0]",
+    );
+    // songStartTime=30 -> trim 30:33 (3s window), then normalized
+    expect(filter).toContain(
+      "[2:a]atrim=30:33,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[songtrim0]",
     );
     expect(filter).toContain(
-      "[0:a][songtrim0]amix=inputs=2:duration=shortest[a0]",
+      "[clipa0][songtrim0]amix=inputs=2:duration=shortest,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0]",
     );
     expect(filter).toContain("[v0][a0]concat=n=1:v=1:a=1[outv][outa]");
   });
@@ -113,7 +119,11 @@ describe("buildFilterComplex", () => {
 
     expect(filter).not.toContain("amix");
     expect(filter).not.toContain("atrim");
-    expect(filter).toContain("[v0][0:a]concat=n=1:v=1:a=1[outv][outa]");
+    // clip audio still normalized, then fed straight into concat
+    expect(filter).toContain(
+      "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0]",
+    );
+    expect(filter).toContain("[v0][a0]concat=n=1:v=1:a=1[outv][outa]");
   });
 
   test("multiple entries increment stream indices and concat with n=count", () => {
@@ -150,6 +160,10 @@ describe("buildFfmpegArgs", () => {
 
     expect(args[0]).toBe("ffmpeg");
     expect(args).toContain("-y");
+    // progress reporting to stdout
+    expect(args).toContain("-progress");
+    expect(args).toContain("pipe:1");
+    expect(args).toContain("-nostats");
     expect(args).toContain("-filter_complex");
     expect(args).toContain("[0:v]copy[outv]");
     expect(args).toContain("libx264");
@@ -159,5 +173,33 @@ describe("buildFfmpegArgs", () => {
     // -map [outv] and -map [outa] both present
     const mapCount = args.filter((a) => a === "-map").length;
     expect(mapCount).toBe(2);
+  });
+});
+
+describe("parseProgressMs", () => {
+  test("parses out_time_us (microseconds) into ms", () => {
+    expect(parseProgressMs("out_time_us=1500000")).toBe(1500);
+  });
+  test("parses out_time_ms (also microseconds in ffmpeg) into ms", () => {
+    expect(parseProgressMs("out_time_ms=2000000")).toBe(2000);
+  });
+  test("returns null for non-progress lines", () => {
+    expect(parseProgressMs("progress=continue")).toBeNull();
+    expect(parseProgressMs("frame=42")).toBeNull();
+    expect(parseProgressMs("")).toBeNull();
+  });
+});
+
+describe("progressPercent", () => {
+  test("computes a rounded percent", () => {
+    expect(progressPercent(1500, 6000)).toBe(25);
+  });
+  test("caps at 99 (completion comes from process exit, not progress)", () => {
+    expect(progressPercent(6000, 6000)).toBe(99);
+    expect(progressPercent(9999, 6000)).toBe(99);
+  });
+  test("returns null when total is unknown or zero", () => {
+    expect(progressPercent(1000, 0)).toBeNull();
+    expect(progressPercent(1000, NaN)).toBeNull();
   });
 });
