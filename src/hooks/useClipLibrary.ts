@@ -20,10 +20,13 @@ export function useClipLibrary() {
   return { query, setQuery, results, allClips: clips };
 }
 
+// Prefix with Vite's BASE_URL so assets resolve under the GitHub Pages
+// project path (/ll-music-reactions/) in production and "/" in dev.
+// BASE_URL always ends with a trailing slash.
 export function getClipUrl(clip: ReactionClip): string {
-  return `/clips/${clip.filename}`;
+  return `${import.meta.env.BASE_URL}clips/${clip.filename}`;
 }
 
 export function getClipThumbnailUrl(clip: ReactionClip): string {
-  return `/thumbnails/${clip.thumbnailFilename}`;
+  return `${import.meta.env.BASE_URL}thumbnails/${clip.thumbnailFilename}`;
 }

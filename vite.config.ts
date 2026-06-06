@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
-export default defineConfig({
+// Project pages serve under /<repo>/, so the production build needs that base
+// path. Dev (`vite`) stays at "/".
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/ll-music-reactions/' : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -13,4 +16,4 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-});
+}));
