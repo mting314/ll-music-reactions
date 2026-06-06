@@ -1,24 +1,27 @@
-import { $ } from "bun";
 import { mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import {
+  buildFfmpegArgs,
+  buildFilterComplex,
+  type ExportRequest,
+  type InputMap,
+} from "./ffmpeg";
 
-const PORT = 3001;
-const PROJECT_ROOT = join(import.meta.dir, "..");
+// Cloud Run injects PORT (defaults to 8080); fall back to 3001 for local dev.
+const PORT = Number(process.env.PORT ?? 3001);
 
-interface ExportEntry {
-  clipPath: string;
-  albumArtUrl: string | null;
-  songAudioUrl: string | null;
-  songStartTime: number;
-  songName: string;
-  clipName: string;
-}
+// Directory holding the bundled reaction clips. In the container the clips are
+// copied to /app/clips; locally they live under the repo's public/clips.
+const CLIPS_DIR = process.env.CLIPS_DIR ?? join(import.meta.dir, "..", "public", "clips");
 
-interface ExportRequest {
-  entries: ExportEntry[];
-  resolution: "720p" | "480p";
-  overlayPosition: "top-right" | "bottom-right" | "top-left" | "bottom-left";
+type Severity = "INFO" | "WARNING" | "ERROR";
+
+// Emit a single-line JSON record. Cloud Logging parses these into structured
+// fields, so you can filter by `severity` or `jsonPayload.requestId` in the
+// Logs Explorer. Locally it just prints readable JSON.
+function log(severity: Severity, message: string, fields: Record<string, unknown> = {}) {
+  console.log(JSON.stringify({ severity, message, ...fields }));
 }
 
 async function downloadFile(url: string, dest: string): Promise<boolean> {
@@ -32,49 +35,17 @@ async function downloadFile(url: string, dest: string): Promise<boolean> {
   }
 }
 
-async function runExport(req: ExportRequest): Promise<string> {
+async function runExport(req: ExportRequest, requestId: string): Promise<string> {
   const workDir = await mkdtemp(join(tmpdir(), "ll-export-"));
   const outputPath = join(workDir, "output.mp4");
 
-  const scale = req.resolution === "720p" ? "1280:720" : "854:480";
-  const overlaySize = req.resolution === "720p" ? 180 : 120;
-  const margin = 20;
-
-  let overlayX: string, overlayY: string;
-  switch (req.overlayPosition) {
-    case "top-right":
-      overlayX = `W-${overlaySize}-${margin}`;
-      overlayY = String(margin);
-      break;
-    case "bottom-right":
-      overlayX = `W-${overlaySize}-${margin}`;
-      overlayY = `H-${overlaySize}-${margin}`;
-      break;
-    case "top-left":
-      overlayX = String(margin);
-      overlayY = String(margin);
-      break;
-    case "bottom-left":
-      overlayX = String(margin);
-      overlayY = `H-${overlaySize}-${margin}`;
-      break;
-  }
-
   const inputArgs: string[] = [];
   let inputIdx = 0;
-  const inputMap: {
-    clipIdx: number;
-    artIdx: number | null;
-    audioIdx: number | null;
-  }[] = [];
+  const inputMap: InputMap[] = [];
 
   for (let i = 0; i < req.entries.length; i++) {
     const entry = req.entries[i]!;
-    console.log(
-      `[${i + 1}/${req.entries.length}] ${entry.songName} + ${entry.clipName}`
-    );
-
-    const clipFile = join(PROJECT_ROOT, "public", "clips", entry.clipPath);
+    const clipFile = join(CLIPS_DIR, entry.clipPath);
     inputArgs.push("-i", clipFile);
     const clipIdx = inputIdx++;
 
@@ -84,6 +55,15 @@ async function runExport(req: ExportRequest): Promise<string> {
       if (await downloadFile(entry.albumArtUrl, artFile)) {
         inputArgs.push("-i", artFile);
         artIdx = inputIdx++;
+      } else {
+        // Silent before: the entry just renders without art. Surface it.
+        log("WARNING", "export.asset.download_failed", {
+          requestId,
+          index: i,
+          asset: "albumArt",
+          url: entry.albumArtUrl,
+          song: entry.songName,
+        });
       }
     }
 
@@ -93,115 +73,97 @@ async function runExport(req: ExportRequest): Promise<string> {
       if (await downloadFile(entry.songAudioUrl, audioFile)) {
         inputArgs.push("-i", audioFile);
         audioIdx = inputIdx++;
+      } else {
+        log("WARNING", "export.asset.download_failed", {
+          requestId,
+          index: i,
+          asset: "songAudio",
+          url: entry.songAudioUrl,
+          song: entry.songName,
+        });
       }
     }
+
+    log("INFO", "export.entry", {
+      requestId,
+      index: i,
+      total: req.entries.length,
+      song: entry.songName,
+      clip: entry.clipName,
+      artResolved: artIdx !== null,
+      audioResolved: audioIdx !== null,
+    });
 
     inputMap.push({ clipIdx, artIdx, audioIdx });
   }
 
-  const filterParts: string[] = [];
-  const concatInputs: string[] = [];
+  const filterStr = buildFilterComplex(req, inputMap);
+  const ffmpegArgs = buildFfmpegArgs(inputArgs, filterStr, outputPath);
 
-  for (let i = 0; i < req.entries.length; i++) {
-    const map = inputMap[i]!;
-    const entry = req.entries[i]!;
+  log("INFO", "export.ffmpeg.start", { requestId, args: ffmpegArgs.join(" ") });
+  const startedAt = Date.now();
 
-    filterParts.push(
-      `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=decrease,pad=${scale}:-1:-1:color=black[scaled${i}]`
-    );
-
-    if (map.artIdx !== null) {
-      filterParts.push(
-        `[${map.artIdx}:v]scale=${overlaySize}:${overlaySize}[artscaled${i}]`
-      );
-      filterParts.push(
-        `[scaled${i}][artscaled${i}]overlay=${overlayX}:${overlayY}[v${i}]`
-      );
-    } else {
-      filterParts.push(`[scaled${i}]copy[v${i}]`);
-    }
-
-    if (map.audioIdx !== null) {
-      const startT = entry.songStartTime;
-      filterParts.push(
-        `[${map.audioIdx}:a]atrim=${startT}:${startT + 3},asetpts=PTS-STARTPTS[songtrim${i}]`
-      );
-      filterParts.push(
-        `[${map.clipIdx}:a][songtrim${i}]amix=inputs=2:duration=shortest[a${i}]`
-      );
-      concatInputs.push(`[v${i}][a${i}]`);
-    } else {
-      concatInputs.push(`[v${i}][${map.clipIdx}:a]`);
-    }
-  }
-
-  filterParts.push(
-    `${concatInputs.join("")}concat=n=${req.entries.length}:v=1:a=1[outv][outa]`
-  );
-
-  const filterStr = filterParts.join(";");
-
-  console.log("Running ffmpeg...");
-  const ffmpegArgs = [
-    "ffmpeg",
-    "-y",
-    ...inputArgs,
-    "-filter_complex",
-    filterStr,
-    "-map",
-    "[outv]",
-    "-map",
-    "[outa]",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "fast",
-    "-crf",
-    "23",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-movflags",
-    "+faststart",
-    outputPath,
-  ];
-
-  const proc = Bun.spawn(ffmpegArgs, {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
+  const proc = Bun.spawn(ffmpegArgs, { stdout: "pipe", stderr: "pipe" });
+  // Always drain stderr (ffmpeg is chatty) so we have it for diagnostics and
+  // never risk a full-pipe stall.
+  const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
+  const ffmpegMs = Date.now() - startedAt;
+
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
     await rm(workDir, { recursive: true }).catch(() => {});
-    throw new Error(`ffmpeg failed (exit ${exitCode}): ${stderr.slice(-500)}`);
+    // Full stderr goes to the logs (queryable); the thrown message stays short.
+    log("ERROR", "export.ffmpeg.failed", {
+      requestId,
+      exitCode,
+      ffmpegMs,
+      stderr,
+      args: ffmpegArgs.join(" "),
+    });
+    throw new Error(
+      `ffmpeg failed (exit ${exitCode}) [requestId=${requestId}]: ${stderr.slice(-500)}`,
+    );
   }
 
-  console.log("Done!");
+  log("INFO", "export.ffmpeg.done", { requestId, exitCode, ffmpegMs });
   return outputPath;
 }
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 const server = Bun.serve({
   port: PORT,
+  // ffmpeg jobs can run long; lift Bun's default idle timeout to the max.
+  idleTimeout: 255,
   async fetch(req) {
+    const { pathname } = new URL(req.url);
+
     if (req.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "POST",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      });
+      return new Response(null, { headers: CORS_HEADERS });
     }
 
-    if (req.method === "POST" && new URL(req.url).pathname === "/export") {
+    // Health check for Cloud Run / readiness probes.
+    if (req.method === "GET" && pathname === "/health") {
+      return new Response("ok", { headers: CORS_HEADERS });
+    }
+
+    if (req.method === "POST" && pathname === "/export") {
+      const requestId = crypto.randomUUID();
+      const startedAt = Date.now();
       try {
         const body = (await req.json()) as ExportRequest;
-        console.log(`\nExport request: ${body.entries.length} entries`);
+        log("INFO", "export.start", {
+          requestId,
+          entries: body.entries.length,
+          resolution: body.resolution,
+          overlayPosition: body.overlayPosition,
+        });
 
-        const outputPath = await runExport(body);
+        const outputPath = await runExport(body, requestId);
         const file = Bun.file(outputPath);
         const data = await file.arrayBuffer();
 
@@ -209,33 +171,46 @@ const server = Bun.serve({
         const workDir = join(outputPath, "..");
         rm(workDir, { recursive: true }).catch(() => {});
 
+        log("INFO", "export.done", {
+          requestId,
+          totalMs: Date.now() - startedAt,
+          bytes: data.byteLength,
+        });
+
         return new Response(data, {
           headers: {
             "Content-Type": "video/mp4",
             "Content-Disposition":
               'attachment; filename="ll-music-reactions.mp4"',
-            "Access-Control-Allow-Origin": "*",
+            "X-Request-Id": requestId,
+            ...CORS_HEADERS,
           },
         });
       } catch (err) {
-        console.error("Export failed:", err);
+        log("ERROR", "export.failed", {
+          requestId,
+          totalMs: Date.now() - startedAt,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return new Response(
           JSON.stringify({
             error: err instanceof Error ? err.message : "Export failed",
+            requestId,
           }),
           {
             status: 500,
             headers: {
               "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
+              "X-Request-Id": requestId,
+              ...CORS_HEADERS,
             },
-          }
+          },
         );
       }
     }
 
-    return new Response("Not found", { status: 404 });
+    return new Response("Not found", { status: 404, headers: CORS_HEADERS });
   },
 });
 
-console.log(`Export server running at http://localhost:${server.port}`);
+log("INFO", "server.start", { port: server.port });

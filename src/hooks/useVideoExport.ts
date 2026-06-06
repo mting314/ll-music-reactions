@@ -5,7 +5,12 @@ import clipManifest from '@/data/clips-manifest.json';
 import type { ReactionClip } from '@/types';
 
 const clips = clipManifest as ReactionClip[];
-const EXPORT_API = 'http://localhost:3001/export';
+
+// Export server base URL. Set VITE_EXPORT_API to the Cloud Run service URL for
+// production builds; falls back to the local Bun server for development.
+const EXPORT_BASE =
+  import.meta.env.VITE_EXPORT_API ?? 'http://localhost:3001';
+const EXPORT_API = `${EXPORT_BASE.replace(/\/$/, '')}/export`;
 
 export function useVideoExport() {
   const [isExporting, setIsExporting] = useState(false);

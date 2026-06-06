@@ -112,7 +112,7 @@ export function ExportPanel({
               <div className="h-full w-full animate-pulse rounded-full bg-pink-600" />
             </div>
             <p className="text-xs text-gray-400">
-              Encoding with local ffmpeg...
+              Encoding on the cloud...
             </p>
           </div>
         )}

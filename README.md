@@ -10,7 +10,7 @@ A web app for creating Love Live music reaction meme videos. Match songs from th
 - **Drag-and-Drop Timeline** — Arrange clip+song pairs in sequence
 - **Setlist Loader** — Load concert setlists (720 performances) as templates
 - **Video Preview** — Play through your sequence with album art corner overlay
-- **FFmpeg.wasm Export** — Client-side video stitching, no backend required. Discord-optimized (<25MB MP4)
+- **Cloud FFmpeg Export** — Video stitching runs on a Cloud Run service (ffmpeg in a container). Discord-optimized (<25MB MP4)
 
 ## Tech Stack
 
@@ -18,7 +18,7 @@ A web app for creating Love Live music reaction meme videos. Match songs from th
 - Vite 6
 - Tailwind CSS 4
 - @dnd-kit (drag-and-drop)
-- @ffmpeg/ffmpeg (client-side video encoding)
+- Bun + ffmpeg on Cloud Run (server-side video encoding)
 - wanakana (Japanese text conversion)
 
 ## Getting Started
@@ -29,6 +29,29 @@ bun dev
 ```
 
 Add reaction clips to `public/clips/` and thumbnails to `public/thumbnails/`, matching filenames in `src/data/clips-manifest.json`.
+
+## Export Service (Cloud Run)
+
+Video stitching is handled by `server/export.ts` (Bun + ffmpeg), deployed to Google Cloud Run. Reaction clips are bundled into the container image; album art and song audio are fetched at request time.
+
+```bash
+# Run the export server locally (used when VITE_EXPORT_API is unset)
+bun run server        # listens on http://localhost:3001
+
+# Unit tests for the ffmpeg argument builder
+bun test server/
+
+# Deploy / redeploy to Cloud Run (builds via Cloud Build, no local Docker needed)
+gcloud run deploy ll-export --source . --region us-central1 \
+  --allow-unauthenticated --memory 1Gi --timeout 300 --port 8080
+```
+
+The frontend targets the export service via `VITE_EXPORT_API`:
+
+- **Development** (`bun dev`) — unset, falls back to `http://localhost:3001`
+- **Production** (`bun run build`) — read from `.env.production` (the Cloud Run URL)
+
+Endpoints: `POST /export` (returns an MP4) and `GET /health`.
 
 ## Data
 
