@@ -19,7 +19,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gate the deploy on the same checks PRs must pass, so main never ships red.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +43,7 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build
         # .env.production supplies VITE_EXPORT_API (the Cloud Run URL).
