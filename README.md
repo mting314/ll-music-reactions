@@ -62,7 +62,15 @@ Endpoints:
 
 ## Data
 
-Song discography data is sourced from [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter).
+Song discography data originates from the Love Live data scrapers
+([hamzaabamboo/ll-sorter-scripts](https://github.com/hamzaabamboo/ll-sorter-scripts),
+consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
+
+The app no longer hardcodes this data. A **Cloud SQL (Postgres)** database is
+refreshed **daily** by a Cloud Run Job running those same scrapers, and the
+frontend fetches it at runtime from a Cloud Run data API (`VITE_DATA_API`),
+falling back to the bundled `src/data` snapshot when the API isn't configured.
+See [`pipeline/README.md`](pipeline/README.md).
 
 ## Contributing
 
