@@ -1,6 +1,7 @@
 import { StrictMode, Component, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { DataProvider } from './context/DataProvider';
 import './index.css';
 
 class ErrorBoundary extends Component<
@@ -28,7 +29,9 @@ class ErrorBoundary extends Component<
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <DataProvider>
+        <App />
+      </DataProvider>
     </ErrorBoundary>
   </StrictMode>,
 );
