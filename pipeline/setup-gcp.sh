@@ -15,10 +15,21 @@ BUCKET="${BUCKET:-${PROJECT}-ll-data}"
 JOB="${JOB:-ll-data-refresh}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# The scraper repo (hamzaabamboo/ll-sorter-scripts) is PRIVATE, so the job needs
+# a GitHub token with read access to clone it. Stored in Secret Manager.
+: "${GITHUB_TOKEN:?Set GITHUB_TOKEN to a GitHub PAT with read access to the scraper repo}"
+SECRET="${SECRET:-ll-github-token}"
+
 echo "==> Enabling APIs"
 gcloud services enable run.googleapis.com cloudscheduler.googleapis.com \
   cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  storage.googleapis.com --project "$PROJECT"
+  storage.googleapis.com secretmanager.googleapis.com --project "$PROJECT"
+
+echo "==> Store GitHub token in Secret Manager ($SECRET)"
+if ! gcloud secrets describe "$SECRET" --project "$PROJECT" >/dev/null 2>&1; then
+  gcloud secrets create "$SECRET" --project "$PROJECT" --replication-policy automatic
+fi
+printf '%s' "$GITHUB_TOKEN" | gcloud secrets versions add "$SECRET" --project "$PROJECT" --data-file=-
 
 echo "==> GCS bucket (gs://$BUCKET)"
 if ! gcloud storage buckets describe "gs://$BUCKET" --project "$PROJECT" >/dev/null 2>&1; then
@@ -38,16 +49,19 @@ JSON
 gcloud storage buckets update "gs://$BUCKET" --cors-file="$CORS_FILE" --project "$PROJECT"
 rm -f "$CORS_FILE"
 
-echo "==> Grant the job's service account write access to the bucket"
+echo "==> Grant the job's service account access (bucket write + secret read)"
 SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
   --member="serviceAccount:${SA}" --role=roles/storage.objectAdmin --project "$PROJECT"
+gcloud secrets add-iam-policy-binding "$SECRET" --project "$PROJECT" \
+  --member="serviceAccount:${SA}" --role=roles/secretmanager.secretAccessor
 
 echo "==> Deploy refresh job (Cloud Run Job)"
 gcloud run jobs deploy "$JOB" \
   --source "$REPO_ROOT/pipeline" \
   --project "$PROJECT" --region "$REGION" \
   --set-env-vars "GCS_BUCKET=${BUCKET}" \
+  --set-secrets "GITHUB_TOKEN=${SECRET}:latest" \
   --task-timeout 1800 --memory 1Gi
 
 echo "==> Daily Cloud Scheduler trigger (03:00 UTC)"
