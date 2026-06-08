@@ -34,12 +34,15 @@ gcloud secrets describe "$SECRET" --project "$PROJECT" >/dev/null 2>&1 \
   || gcloud secrets create "$SECRET" --project "$PROJECT" --replication-policy automatic
 printf '%s' "$GITHUB_TOKEN" | gcloud secrets versions add "$SECRET" --project "$PROJECT" --data-file=-
 
-echo "==> Grant the service account Firestore + secret access"
+echo "==> Grant the service account Firestore + secret + job-run access"
 SA="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${SA}" --role=roles/datastore.user --condition=None >/dev/null
 gcloud secrets add-iam-policy-binding "$SECRET" --project "$PROJECT" \
   --member="serviceAccount:${SA}" --role=roles/secretmanager.secretAccessor >/dev/null
+# Lets Cloud Scheduler (running as this SA) trigger the Cloud Run Job.
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${SA}" --role=roles/run.developer --condition=None >/dev/null
 
 echo "==> Deploy data API (Cloud Run service, reads Firestore)"
 gcloud run deploy "$SERVICE" \
