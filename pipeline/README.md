@@ -11,24 +11,127 @@ the Firebase SDK).
 
 ## Architecture
 
-```
-Cloud Scheduler (daily 03:00 UTC)
-        │  POST :run
-        ▼
-Cloud Run Job  ── clone upstream scrapers (pinned, private → token) + seed
- (ll-data-refresh) ── run update.ts (DATA_ONLY) + parse-discography
-        │             ── write native docs to Firestore
-        ▼
-Firestore (collections: songs, artists, discographies, series,
-           performances, setlists, meta/{seriesNames,build})
-        ▲
-        │  REST read (cached)
-Cloud Run Service (ll-data-api)  ──  GET /data  ──►  Frontend (DataProvider)
+```mermaid
+flowchart LR
+    subgraph ext["External sources"]
+        LF["ll-fans.jp /<br/>lovelive-anime.jp"]
+        WIKI["Love Live<br/>Fandom wiki"]
+    end
+
+    SCH["Cloud Scheduler<br/>daily 03:00 UTC"]
+    SECRET[["Secret Manager<br/>GitHub token"]]
+    SCRIPTS["ll-sorter-scripts<br/>(private, pinned SHA)"]
+
+    subgraph job["Cloud Run Job · ll-data-refresh"]
+        REFRESH["clone scrapers + seed baseline<br/>run update.ts + parse-discography<br/>build dataset"]
+    end
+
+    FS[("Firestore<br/>per-entity docs + snapshot")]
+    API["Cloud Run · ll-data-api<br/>GET /data (cached)"]
+    WEB["Frontend · GitHub Pages<br/>DataProvider"]
+    BUNDLE["bundled src/data<br/>(fallback)"]
+
+    SCH -->|triggers| REFRESH
+    SECRET -.token.-> REFRESH
+    SCRIPTS -.cloned by.-> REFRESH
+    LF --> REFRESH
+    WIKI --> REFRESH
+    REFRESH -->|write docs + snapshot| FS
+    API -->|read snapshot ~4 reads| FS
+    WEB -->|fetch /data| API
+    BUNDLE -.if API unset/unreachable.-> WEB
 ```
 
 The frontend fetches `GET /data` when `VITE_DATA_API` is set; otherwise it falls
 back to the bundled `src/data` snapshot, so the app always works (and the live
 site is unaffected until provisioned).
+
+## Data model
+
+Firestore collections (each entity is one native document, keyed by its `id`):
+
+```mermaid
+erDiagram
+    series  }o--o{ songs         : "seriesIds"
+    series  }o--o{ artists       : "seriesIds"
+    series  }o--o{ discographies : "seriesIds"
+    series  }o--o{ performances  : "seriesIds"
+    discographies }o--o{ songs   : "discographyIds"
+    artists }o--o{ songs         : "artists[].id"
+    artists }o--o{ discographies : "artistVariants[].id"
+    performances ||--o| setlists : "1:1 by id"
+    songs   }o--o{ setlists      : "items[].songId"
+
+    songs {
+        string id PK
+        string name
+        string englishName "from wiki"
+        string phoneticName
+        string wikiAudioUrl "from wiki"
+        string releasedOn
+        array  seriesIds FK
+        array  discographyIds FK
+        array  artists "FK to artists"
+    }
+    artists {
+        string id PK
+        string name
+        array  seriesIds FK
+        array  characters
+    }
+    discographies {
+        string id PK
+        string name
+        string type
+        string releasedAt
+        array  versions "versions[].imageUrl = album art"
+        array  artistVariants FK
+        array  seriesIds FK
+    }
+    series {
+        number id PK
+        string name
+        string englishName
+        string color
+    }
+    performances {
+        string id PK
+        string tourName
+        string date
+        string venue
+        bool   hasSetlist
+        array  seriesIds FK
+    }
+    setlists {
+        string id PK
+        string performanceId FK
+        array  items "SetlistItem[] -> songId"
+        array  sections
+    }
+```
+
+Plus two non-entity collections:
+
+- **`meta`** — `meta/seriesNames` (JP→EN name map) and `meta/build`
+  (`{ generatedAt, counts }` for the last refresh).
+- **`snapshot`** — the whole dataset JSON split into `<1 MiB` chunks
+  (`snapshot/0…N` + `snapshot/meta`), so `GET /data` is ~4 reads instead of
+  ~3,100. The per-entity collections above stay queryable; the snapshot is just
+  the cheap serving path.
+
+The `/data` response the frontend consumes is:
+
+```jsonc
+{
+  "songs": [...], "artists": [...], "discographies": [...],
+  "seriesInfo": [...], "seriesNames": { "<jp>": "<en>" },
+  "performances": [...], "setlists": { "<performanceId>": { ...Setlist } },
+  "build": { "generatedAt": "<iso>", "counts": { "songs": 886, ... } }
+}
+```
+
+> `characters` (id, name, school, units, seriesIds) is also scraped and stored,
+> but not yet consumed by the app.
 
 ## Pieces
 
