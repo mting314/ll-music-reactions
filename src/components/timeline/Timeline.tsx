@@ -93,6 +93,7 @@ function SortableEntry({
             alt=""
             className="h-8 w-8 shrink-0 rounded object-cover"
             loading="lazy"
+            crossOrigin="anonymous"
             referrerPolicy="no-referrer"
           />
         )}

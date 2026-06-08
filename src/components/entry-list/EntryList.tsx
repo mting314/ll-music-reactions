@@ -93,6 +93,7 @@ export function EntryList({
                   alt=""
                   className="h-10 w-10 shrink-0 rounded object-cover"
                   loading="lazy"
+                  crossOrigin="anonymous"
                   referrerPolicy="no-referrer"
                 />
               ) : (

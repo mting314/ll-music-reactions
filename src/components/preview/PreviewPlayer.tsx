@@ -145,6 +145,7 @@ export function PreviewPlayer({
                 src={currentArtUrl}
                 alt=""
                 className="h-64 w-64 rounded-lg shadow-lg border border-white/20"
+                crossOrigin="anonymous"
                 referrerPolicy="no-referrer"
               />
             </div>
