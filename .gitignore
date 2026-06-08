@@ -5,3 +5,5 @@ dist
 public/.DS_Store
 .DS_Store
 tsconfig.tsbuildinfo
+pipeline/.work
+pipeline/.env
