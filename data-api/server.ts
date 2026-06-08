@@ -97,7 +97,24 @@ async function getDoc(collection: string, id: string): Promise<Record<string, un
 
 // ---- dataset assembly (shape the frontend expects) -------------------------
 
-async function buildDataset() {
+// Fast path: read the pre-assembled snapshot (~4 doc reads) instead of every
+// per-entity document (~3,100 reads). Returns null if no snapshot exists yet.
+async function readSnapshot(): Promise<unknown | null> {
+  const meta = await getDoc("snapshot", "meta");
+  const n = meta?.chunks;
+  if (typeof n !== "number" || n < 1) return null;
+  const parts = await Promise.all(
+    Array.from({ length: n }, (_, i) => getDoc("snapshot", String(i))),
+  );
+  if (parts.some((p) => !p || typeof p.part !== "string")) return null;
+  try {
+    return JSON.parse(parts.map((p) => p!.part as string).join(""));
+  } catch {
+    return null;
+  }
+}
+
+async function buildDatasetFromCollections() {
   const [songs, artists, discographies, series, performances, setlistDocs, seriesNamesDoc, buildDoc] =
     await Promise.all([
       listCollection("songs"),
@@ -145,7 +162,9 @@ const server = Bun.serve({
     if (req.method === "GET" && pathname === "/data") {
       try {
         if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
-          cache = { at: Date.now(), data: await buildDataset() };
+          // Cheap snapshot path first; fall back to per-collection assembly.
+          const data = (await readSnapshot()) ?? (await buildDatasetFromCollections());
+          cache = { at: Date.now(), data };
         }
         return Response.json(cache.data, {
           headers: { "Cache-Control": "public, max-age=300, s-maxage=3600", ...CORS },
