@@ -142,6 +142,44 @@ async function buildDatasetFromCollections() {
   };
 }
 
+type Raw = Record<string, unknown>;
+const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+const obj = (v: unknown) => (v && typeof v === "object" ? (v as Raw) : {});
+
+// Normalize either source (snapshot or per-collection) into one canonical
+// shape: the dataset arrays plus a single `build: { generatedAt, counts }`.
+// The snapshot carries top-level `generatedAt`; the collection path carries a
+// `build` doc — this collapses both to the same response.
+function normalize(d: Raw) {
+  const songs = arr(d.songs);
+  const artists = arr(d.artists);
+  const discographies = arr(d.discographies);
+  const seriesInfo = arr(d.seriesInfo);
+  const performances = arr(d.performances);
+  const setlists = obj(d.setlists);
+  const counts = {
+    songs: songs.length,
+    artists: artists.length,
+    discographies: discographies.length,
+    series: seriesInfo.length,
+    performances: performances.length,
+    setlists: Object.keys(setlists).length,
+  };
+  const build =
+    (d.build as Raw | undefined) ??
+    (d.generatedAt ? { generatedAt: d.generatedAt, counts } : null);
+  return {
+    songs,
+    artists,
+    discographies,
+    seriesInfo,
+    seriesNames: obj(d.seriesNames),
+    performances,
+    setlists,
+    build,
+  };
+}
+
 let cache: { at: number; data: unknown } | null = null;
 
 const CORS = {
@@ -163,8 +201,9 @@ const server = Bun.serve({
       try {
         if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
           // Cheap snapshot path first; fall back to per-collection assembly.
-          const data = (await readSnapshot()) ?? (await buildDatasetFromCollections());
-          cache = { at: Date.now(), data };
+          // Normalize so both paths return the identical shape.
+          const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
+          cache = { at: Date.now(), data: normalize(raw as Record<string, unknown>) };
         }
         return Response.json(cache.data, {
           headers: { "Cache-Control": "public, max-age=300, s-maxage=3600", ...CORS },
