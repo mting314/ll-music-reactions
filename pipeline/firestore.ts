@@ -76,7 +76,7 @@ export async function getProjectId(): Promise<string> {
   return process.env.FIRESTORE_PROJECT ?? metadata("project/project-id");
 }
 
-async function token(): Promise<string> {
+export async function accessToken(): Promise<string> {
   const resp = await fetch(
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
     { headers: { "Metadata-Flavor": "Google" } },
@@ -94,7 +94,7 @@ export async function commitUpserts(
   project: string,
   docs: { collection: string; id: string; data: object }[],
 ): Promise<void> {
-  const auth = await token();
+  const auth = await accessToken();
   for (let i = 0; i < docs.length; i += 500) {
     const batch = docs.slice(i, i + 500);
     const writes = batch.map((d) => ({
@@ -125,7 +125,7 @@ export async function listCollection(
   project: string,
   collection: string,
 ): Promise<Record<string, unknown>[]> {
-  const auth = await token();
+  const auth = await accessToken();
   const out: Record<string, unknown>[] = [];
   let pageToken = "";
   do {
@@ -152,7 +152,7 @@ export async function getDoc(
   collection: string,
   id: string,
 ): Promise<Record<string, unknown> | null> {
-  const auth = await token();
+  const auth = await accessToken();
   const resp = await fetch(`${BASE}/${docPath(project, collection, id)}`, {
     headers: { Authorization: `Bearer ${auth}` },
   });
