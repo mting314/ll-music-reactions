@@ -1,17 +1,11 @@
-// Assembles the canonical JSON data files into the single dataset object the
-// frontend consumes (see src/data/dataset.ts), and writes it either to GCS
-// (the daily job) or to a local file (for testing/seeding).
+// Assembles the canonical JSON data files into one dataset object (the shape
+// the frontend consumes). The daily job loads this into Firestore; this module
+// is also runnable standalone to produce a local dataset.json for inspection.
 //
-// Usage:
-//   bun run build-dataset.ts <dataDir> --out ./dataset.json   # local file
-//   bun run build-dataset.ts <dataDir> --bucket my-bucket     # upload to GCS
+// Usage: bun run build-dataset.ts <dataDir> --out ./dataset.json
 import { join } from "path";
-import { uploadJson } from "./gcs";
 
 type Json = Record<string, unknown>;
-
-// Object name written to the bucket; the frontend fetches this.
-export const DATASET_OBJECT = "dataset.json";
 
 async function readJson<T>(dir: string, file: string, fallback: T): Promise<T> {
   const f = Bun.file(join(dir, file));
@@ -64,25 +58,17 @@ export function datasetCounts(d: Dataset): Record<string, number> {
   };
 }
 
-// CLI: build from a data dir and write locally or to GCS.
+// CLI: build from a data dir and write a local file (for inspection).
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const dataDir = args[0] ?? join(import.meta.dir, "..", "src", "data");
   const outIdx = args.indexOf("--out");
-  const bucketIdx = args.indexOf("--bucket");
-  // Stable timestamp passed in by the caller, or now for local builds.
   const generatedAt = process.env.GENERATED_AT ?? new Date().toISOString();
 
   const dataset = await buildDataset(dataDir, generatedAt);
   console.log("Built dataset:", datasetCounts(dataset));
 
-  if (bucketIdx !== -1) {
-    const bucket = args[bucketIdx + 1]!;
-    await uploadJson(bucket, DATASET_OBJECT, dataset);
-    console.log(`Uploaded gs://${bucket}/${DATASET_OBJECT}`);
-  } else {
-    const out = outIdx !== -1 ? args[outIdx + 1]! : "./dataset.json";
-    await Bun.write(out, JSON.stringify(dataset));
-    console.log(`Wrote ${out}`);
-  }
+  const out = outIdx !== -1 ? args[outIdx + 1]! : "./dataset.json";
+  await Bun.write(out, JSON.stringify(dataset));
+  console.log(`Wrote ${out}`);
 }

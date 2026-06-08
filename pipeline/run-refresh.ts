@@ -5,16 +5,17 @@
 //   2. Lay them out as they expect, seeded with a baseline `data/` (incl.
 //      `data/raw`) so the incremental scripts have a starting point.
 //   3. Run upstream `update.ts` (DATA_ONLY) + `parse-discography`.
-//   4. Assemble the canonical JSON into one dataset and upload it to GCS.
+//   4. Assemble the canonical JSON and write it into Firestore.
 //
 // NOTE: the scrape step hits external sites (lovelive-anime.jp, ll-fans.jp, the
 // fandom wiki) and depends on the upstream repos' layout, so it can only be
-// validated in the live Cloud Run Job. The build/upload below is independent.
+// validated in the live Cloud Run Job. The build/load below is independent.
 import { $ } from "bun";
 import { cp, mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { buildDataset, datasetCounts } from "./build-dataset";
-import { uploadJson } from "./gcs";
+import { loadDataset } from "./load-firestore";
+import { getProjectId } from "./firestore";
 
 const SCRAPER_REPO =
   process.env.SCRAPER_REPO ?? "https://github.com/hamzaabamboo/ll-sorter-scripts";
@@ -24,9 +25,6 @@ const SCRAPER_REF =
 const SEED_REPO =
   process.env.SEED_REPO ?? "https://github.com/hamproductions/the-sorter";
 const SEED_REF = process.env.SEED_REF ?? "main";
-
-const GCS_BUCKET = process.env.GCS_BUCKET;
-if (!GCS_BUCKET) throw new Error("GCS_BUCKET is not set");
 
 // The scraper repo is private, so the job needs a GitHub token (read access)
 // to clone it. Provide via Secret Manager (see setup-gcp.sh). Never logged.
@@ -91,10 +89,11 @@ async function main() {
     const dataset = await buildDataset(dataDir, generatedAt);
     console.log("Counts:", datasetCounts(dataset));
 
-    console.log(`Uploading to gs://${GCS_BUCKET}/dataset.json ...`);
-    await uploadJson(GCS_BUCKET, "dataset.json", dataset);
+    const project = await getProjectId();
+    console.log(`Writing to Firestore (project ${project})...`);
+    const counts = await loadDataset(project, dataset);
 
-    console.log("Refresh complete.");
+    console.log("Refresh complete:", counts);
   } catch (err) {
     console.error("Refresh failed:", redact(err instanceof Error ? err.message : String(err)));
     // Bun's ShellError carries the failed command's stderr/stdout (redacted).

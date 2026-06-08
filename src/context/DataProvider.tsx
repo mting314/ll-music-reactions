@@ -9,10 +9,10 @@ import { bundledDataset, toDataset, type Dataset } from '@/data/dataset';
 
 const DataContext = createContext<Dataset | null>(null);
 
-// Source of the dataset. When VITE_DATA_URL is set (the public GCS object,
-// refreshed daily), the app fetches it at runtime; otherwise it uses the
-// bundled snapshot.
-const DATA_URL = import.meta.env.VITE_DATA_URL as string | undefined;
+// Source of the dataset. When VITE_DATA_API is set (the Cloud Run data API
+// backed by Firestore, refreshed daily), the app fetches it at runtime;
+// otherwise it uses the bundled snapshot.
+const DATA_API = import.meta.env.VITE_DATA_API as string | undefined;
 
 export function useDataset(): Dataset {
   const dataset = useContext(DataContext);
@@ -23,20 +23,20 @@ export function useDataset(): Dataset {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  // When no URL is configured, render synchronously from the bundled snapshot
+  // When no API is configured, render synchronously from the bundled snapshot
   // (no loading state) — preserves current behavior.
   const [dataset, setDataset] = useState<Dataset | null>(
-    DATA_URL ? null : bundledDataset,
+    DATA_API ? null : bundledDataset,
   );
 
   useEffect(() => {
-    if (!DATA_URL) return;
+    if (!DATA_API) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const resp = await fetch(DATA_URL);
-        if (!resp.ok) throw new Error(`Data fetch ${resp.status}`);
+        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`);
+        if (!resp.ok) throw new Error(`Data API ${resp.status}`);
         const json = await resp.json();
         if (!cancelled) setDataset(toDataset(json));
       } catch (err) {

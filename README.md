@@ -66,12 +66,12 @@ Song discography data originates from the Love Live data scrapers
 ([hamzaabamboo/ll-sorter-scripts](https://github.com/hamzaabamboo/ll-sorter-scripts),
 consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
 
-The app no longer hardcodes this data. A dataset in **Google Cloud Storage** is
-refreshed **daily** by a Cloud Run Job running those same scrapers, and the
-frontend fetches it at runtime (`VITE_DATA_URL`), falling back to the bundled
-`src/data` snapshot when it isn't configured. GCS is used instead of a database
-because the app loads everything and filters client-side (no server-side
-queries), keeping cost at ~$0/month. See [`pipeline/README.md`](pipeline/README.md).
+The app no longer hardcodes this data. A **Firestore** database is refreshed
+**daily** by a Cloud Run Job running those same scrapers, and the frontend
+fetches it at runtime from a Cloud Run data API (`VITE_DATA_API`), falling back
+to the bundled `src/data` snapshot when it isn't configured. Firestore stores
+each entity as a queryable document and is ~$0/month at this scale. See
+[`pipeline/README.md`](pipeline/README.md).
 
 ## Contributing
 
