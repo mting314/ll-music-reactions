@@ -3,9 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "seed": "bun run load-to-db.ts ../src/data",
-    "refresh": "bun run run-refresh.ts",
-    "schema": "bun run apply-schema.ts"
+    "build:local": "bun run build-dataset.ts ../src/data --out ./dataset.json",
+    "refresh": "bun run run-refresh.ts"
   },
   "dependencies": {
     "chroma-js": "^3.1.2",

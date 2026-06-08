@@ -33,7 +33,7 @@ export default tseslint.config(
 
   // Server / pipeline / data-api code (Bun runtime, Node-ish globals).
   {
-    files: ['server/**/*.ts', 'pipeline/**/*.ts', 'data-api/**/*.ts'],
+    files: ['server/**/*.ts', 'pipeline/**/*.ts'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2022,

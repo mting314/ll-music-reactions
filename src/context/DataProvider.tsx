@@ -9,9 +9,10 @@ import { bundledDataset, toDataset, type Dataset } from '@/data/dataset';
 
 const DataContext = createContext<Dataset | null>(null);
 
-// Source of the dataset. When VITE_DATA_API is set, the app fetches the
-// DB-backed dataset at runtime; otherwise it uses the bundled snapshot.
-const DATA_API = import.meta.env.VITE_DATA_API as string | undefined;
+// Source of the dataset. When VITE_DATA_URL is set (the public GCS object,
+// refreshed daily), the app fetches it at runtime; otherwise it uses the
+// bundled snapshot.
+const DATA_URL = import.meta.env.VITE_DATA_URL as string | undefined;
 
 export function useDataset(): Dataset {
   const dataset = useContext(DataContext);
@@ -22,25 +23,25 @@ export function useDataset(): Dataset {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  // When no API is configured, render synchronously from the bundled snapshot
+  // When no URL is configured, render synchronously from the bundled snapshot
   // (no loading state) — preserves current behavior.
   const [dataset, setDataset] = useState<Dataset | null>(
-    DATA_API ? null : bundledDataset,
+    DATA_URL ? null : bundledDataset,
   );
 
   useEffect(() => {
-    if (!DATA_API) return;
+    if (!DATA_URL) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`);
-        if (!resp.ok) throw new Error(`Data API ${resp.status}`);
+        const resp = await fetch(DATA_URL);
+        if (!resp.ok) throw new Error(`Data fetch ${resp.status}`);
         const json = await resp.json();
         if (!cancelled) setDataset(toDataset(json));
       } catch (err) {
-        // Network/API failure should never blank the app — fall back.
-        console.warn('Data API unavailable, using bundled data:', err);
+        // Network failure should never blank the app — fall back.
+        console.warn('Remote data unavailable, using bundled data:', err);
         if (!cancelled) setDataset(bundledDataset);
       }
     })();
