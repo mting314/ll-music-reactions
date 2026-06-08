@@ -1,0 +1,16 @@
+{
+  "name": "ll-music-reactions-pipeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:local": "bun run build-dataset.ts ../src/data --out ./dataset.json",
+    "refresh": "bun run run-refresh.ts"
+  },
+  "dependencies": {
+    "chroma-js": "^3.1.2",
+    "file-type": "^19.6.0",
+    "lodash": "^4.17.21",
+    "lodash-es": "^4.17.21",
+    "wanakana": "^5.3.1"
+  }
+}

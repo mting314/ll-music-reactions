@@ -62,7 +62,28 @@ Endpoints:
 
 ## Data
 
-Song discography data is sourced from [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter).
+Song discography data originates from the Love Live data scrapers
+([hamzaabamboo/ll-sorter-scripts](https://github.com/hamzaabamboo/ll-sorter-scripts),
+consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
+
+The app no longer hardcodes this data. A **Firestore** database is refreshed
+**daily** by a Cloud Run Job running those same scrapers, and the frontend
+fetches it at runtime from a Cloud Run data API (`VITE_DATA_API`), falling back
+to the bundled `src/data` snapshot when it isn't configured. Firestore stores
+each entity as a queryable document and is ~$0/month at this scale.
+
+```mermaid
+flowchart LR
+    SCH["Cloud Scheduler<br/>(daily)"] -->|triggers| JOB["Cloud Run Job<br/>scrape + load"]
+    SCRIPTS["ll-sorter-scripts<br/>+ Fandom wiki"] -.-> JOB
+    JOB -->|write docs + snapshot| FS[("Firestore")]
+    API["Cloud Run<br/>data API · /data"] -->|read snapshot| FS
+    WEB["Frontend<br/>(GitHub Pages)"] -->|fetch /data| API
+    BUNDLE["bundled src/data"] -.fallback.-> WEB
+```
+
+See [`pipeline/README.md`](pipeline/README.md) for the full architecture and the
+**data model (ER) diagram**.
 
 ## Contributing
 

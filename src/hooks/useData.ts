@@ -8,68 +8,65 @@ import type {
   Setlist,
   ReactionClip,
 } from '@/types';
-
-import songData from '@/data/song-info.json';
-import artistData from '@/data/artists-info.json';
-import discographyData from '@/data/discography-info.json';
-import seriesInfoData from '@/data/series-info.json';
-import seriesNameData from '@/data/series.json';
-import performanceData from '@/data/performance-info.json';
-import setlistData from '@/data/performance-setlists.json';
+import { useDataset } from '@/context/DataProvider';
 import clipManifest from '@/data/clips-manifest.json';
 
+// Song/artist/discography/series/performance data now comes from the Dataset
+// (DB-backed API at runtime, or the bundled snapshot as a fallback) via
+// DataProvider. Reaction clips remain bundled — they're our own assets.
+
 export function useSongs(): Song[] {
-  return songData as Song[];
+  return useDataset().songs;
 }
 
 export function useArtists(): Artist[] {
-  return artistData as Artist[];
+  return useDataset().artists;
 }
 
 export function useArtistMap(): Map<string, Artist> {
+  const artists = useDataset().artists;
   return useMemo(() => {
     const map = new Map<string, Artist>();
-    for (const artist of artistData as Artist[]) {
+    for (const artist of artists) {
       map.set(artist.id, artist);
     }
     return map;
-  }, []);
+  }, [artists]);
 }
 
 export function useDiscography(): Discography[] {
-  return discographyData as Discography[];
+  return useDataset().discographies;
 }
 
 export function useDiscographyMap(): Map<string, Discography> {
+  const discographies = useDataset().discographies;
   return useMemo(() => {
     const map = new Map<string, Discography>();
-    for (const disc of discographyData as Discography[]) {
+    for (const disc of discographies) {
       map.set(disc.id, disc);
     }
     return map;
-  }, []);
+  }, [discographies]);
 }
 
 export function useSeries(): Series[] {
-  const names = seriesNameData as Record<string, string>;
+  const { seriesInfo, seriesNames } = useDataset();
   return useMemo(() => {
-    return (seriesInfoData as { id: string; name: string; color: string }[]).map(
-      (s) => ({
-        id: Number(s.id),
-        name: s.name,
-        englishName: names[s.name] ?? s.name,
-        color: s.color,
-      }),
-    );
-  }, [names]);
+    return seriesInfo.map((s) => ({
+      id: Number(s.id),
+      name: s.name,
+      englishName: seriesNames[s.name] ?? s.name,
+      color: s.color,
+    }));
+  }, [seriesInfo, seriesNames]);
 }
 
 export function usePerformances(): Performance[] {
-  return performanceData as Performance[];
+  return useDataset().performances;
 }
 
 export function useSetlists(): Record<string, Setlist> {
-  return setlistData as unknown as Record<string, Setlist>;
+  return useDataset().setlists;
 }
 
 export function useClips(): ReactionClip[] {

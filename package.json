@@ -8,7 +8,7 @@
     "server": "bun run server/export.ts",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "test": "bun test server/",
+    "test": "bun test server/ pipeline/",
     "ci": "bun run lint && bun run typecheck && bun run test",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
