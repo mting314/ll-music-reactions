@@ -23,6 +23,10 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Generate data snapshot
+        env:
+          FORCE_SNAPSHOT: '1'
+        run: bun run fetch-snapshot
       - run: bun run lint
 
   typecheck:
@@ -33,6 +37,10 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Generate data snapshot
+        env:
+          FORCE_SNAPSHOT: '1'
+        run: bun run fetch-snapshot
       - run: bun run typecheck
 
   test:
@@ -53,4 +61,8 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Generate data snapshot
+        env:
+          FORCE_SNAPSHOT: '1'
+        run: bun run fetch-snapshot
       - run: bun run build

@@ -7,3 +7,8 @@ public/.DS_Store
 tsconfig.tsbuildinfo
 pipeline/.work
 pipeline/.env
+
+# Dataset snapshot — generated at build time by scripts/fetch-snapshot.ts.
+# Never committed; regenerated on every build/deploy so the repo never holds
+# stale data.
+src/data/snapshot.json
