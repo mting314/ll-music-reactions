@@ -191,6 +191,11 @@ let cache: Payload | null = null;
 // In-flight refresh, so a burst of requests against a cold/expired cache shares
 // one Firestore assembly + compression instead of running one per request.
 let inflight: Promise<Payload> | null = null;
+// When a refresh fails, serve stale data and back off for this long instead of
+// re-attempting on every request — so a Firestore outage degrades to "slightly
+// stale" rather than a full outage + a retry storm against the failing backend.
+let failedAt = 0;
+const FAIL_COOLDOWN_MS = 30 * 1000;
 
 async function refresh(): Promise<Payload> {
   // Cheap snapshot path first; fall back to per-collection assembly.
@@ -206,14 +211,29 @@ async function refresh(): Promise<Payload> {
   return cache;
 }
 
-function getPayload(): Promise<Payload> {
-  if (cache && Date.now() - cache.at <= CACHE_TTL_MS) return Promise.resolve(cache);
+async function getPayload(): Promise<Payload> {
+  const now = Date.now();
+  if (cache && now - cache.at <= CACHE_TTL_MS) return cache;
+  // Recently failed and we have something to serve: skip the retry, serve stale.
+  if (cache && now - failedAt < FAIL_COOLDOWN_MS) return cache;
   if (!inflight) {
-    inflight = refresh().finally(() => {
-      inflight = null;
-    });
+    inflight = refresh()
+      .catch((err) => {
+        failedAt = Date.now();
+        throw err;
+      })
+      .finally(() => {
+        inflight = null;
+      });
   }
-  return inflight;
+  try {
+    return await inflight;
+  } catch (err) {
+    // Refresh failed — serve the last-good payload rather than erroring out.
+    // Only a cold cache (no prior successful load) surfaces the error as a 500.
+    if (cache) return cache;
+    throw err;
+  }
 }
 
 const CORS = {
