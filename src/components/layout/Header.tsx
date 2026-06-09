@@ -1,3 +1,5 @@
+import { useBuildInfo } from '@/hooks/useData';
+
 interface HeaderProps {
   onLoadSetlist: () => void;
   onPreview: () => void;
@@ -19,13 +21,26 @@ export function Header({
   canRedo,
   hasEntries,
 }: HeaderProps) {
+  const build = useBuildInfo();
+  // Format in UTC so every viewer sees the same date as the refresh job's
+  // stamp (it runs at a fixed UTC time); local time would show "yesterday" for
+  // viewers behind UTC. The exact timestamp is on hover.
+  const updated = build?.generatedAt
+    ? new Date(build.generatedAt).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      })
+    : null;
+
   return (
     <header className="flex items-center justify-between border-b border-gray-700 bg-[#1a1a2e] px-6 py-3">
       <h1 className="text-lg font-bold text-white">
         <span className="text-pink-400">LL</span> Music Reactions
       </h1>
 
-      <div className="flex gap-3">
+      <div className="flex items-center gap-3">
         <div className="flex gap-1 border-r border-gray-700 pr-3">
           <button
             onClick={onUndo}
@@ -64,6 +79,15 @@ export function Header({
         >
           Export
         </button>
+
+        {updated && (
+          <span
+            className="ml-2 whitespace-nowrap text-xs text-gray-500"
+            title={`Data last refreshed ${build?.generatedAt}`}
+          >
+            Updated {updated}
+          </span>
+        )}
       </div>
     </header>
   );

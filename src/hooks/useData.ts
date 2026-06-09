@@ -9,6 +9,7 @@ import type {
   ReactionClip,
 } from '@/types';
 import { useDataset } from '@/context/DataProvider';
+import type { BuildInfo } from '@/data/dataset';
 import clipManifest from '@/data/clips-manifest.json';
 
 // Song/artist/discography/series/performance data now comes from the Dataset
@@ -71,6 +72,12 @@ export function useSetlists(): Record<string, Setlist> {
 
 export function useClips(): ReactionClip[] {
   return clipManifest as ReactionClip[];
+}
+
+// Provenance of the loaded dataset (when it was last refreshed). Null when the
+// payload carries no build info.
+export function useBuildInfo(): BuildInfo | null {
+  return useDataset().build;
 }
 
 export function getAlbumArtUrl(

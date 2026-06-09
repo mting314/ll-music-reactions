@@ -11,6 +11,13 @@ export interface SeriesInfo {
   color: string;
 }
 
+// Provenance of the dataset, stamped by the daily refresh job
+// (pipeline/run-refresh.ts) and carried through the /data payload.
+export interface BuildInfo {
+  generatedAt?: string;
+  counts?: Record<string, number>;
+}
+
 // The full dataset the app needs, sourced either from the data API (DB-backed)
 // at runtime or the bundled snapshot below as the first-paint / offline fallback.
 export interface Dataset {
@@ -21,6 +28,7 @@ export interface Dataset {
   seriesNames: Record<string, string>;
   performances: Performance[];
   setlists: Record<string, Setlist>;
+  build: BuildInfo | null;
 }
 
 // Coerce an arbitrary /data payload (live API or bundled snapshot) into a
@@ -35,6 +43,7 @@ export function toDataset(raw: unknown): Dataset {
     seriesNames: d.seriesNames ?? {},
     performances: d.performances ?? [],
     setlists: d.setlists ?? {},
+    build: d.build ?? null,
   };
 }
 
