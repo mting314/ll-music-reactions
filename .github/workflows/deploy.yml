@@ -28,6 +28,10 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Generate data snapshot
+        env:
+          FORCE_SNAPSHOT: '1'
+        run: bun run fetch-snapshot
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run test
@@ -45,8 +49,16 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Generate data snapshot
+        # Pulls GET /data from the Cloud Run data API into src/data/snapshot.json
+        # (gitignored). FORCE makes it always fetch fresh and fail the build if
+        # the API is unreachable, so we never ship an empty dataset.
+        env:
+          FORCE_SNAPSHOT: '1'
+        run: bun run fetch-snapshot
+
       - name: Build
-        # .env.production supplies VITE_EXPORT_API (the Cloud Run URL).
+        # .env.production supplies VITE_DATA_API / VITE_EXPORT_API (Cloud Run URLs).
         run: bun run build
 
       - uses: actions/upload-pages-artifact@v3
