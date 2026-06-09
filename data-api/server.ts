@@ -180,7 +180,61 @@ function normalize(d: Raw) {
   };
 }
 
-let cache: { at: number; data: unknown } | null = null;
+// In-memory cache of the assembled payload, held in both serialized forms so we
+// serialize and gzip once per refresh, not per request.
+interface Payload {
+  at: number;
+  json: string;
+  gzip: Uint8Array;
+}
+let cache: Payload | null = null;
+// In-flight refresh, so a burst of requests against a cold/expired cache shares
+// one Firestore assembly + compression instead of running one per request.
+let inflight: Promise<Payload> | null = null;
+// When a refresh fails, serve stale data and back off for this long instead of
+// re-attempting on every request — so a Firestore outage degrades to "slightly
+// stale" rather than a full outage + a retry storm against the failing backend.
+let failedAt = 0;
+const FAIL_COOLDOWN_MS = 30 * 1000;
+
+async function refresh(): Promise<Payload> {
+  // Cheap snapshot path first; fall back to per-collection assembly.
+  // Normalize so both paths return the identical shape.
+  const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
+  const json = JSON.stringify(normalize(raw as Record<string, unknown>));
+  // App-layer gzip (~2 MB -> ~270 KB): the Google Frontend does NOT compress
+  // this response, so we do it here. Bun.gzipSync is synchronous, but with the
+  // in-flight lock it runs once per refresh (~13 ms). Default level — level 9
+  // ~doubles CPU for only ~5% fewer bytes, not worth it for a reused result.
+  const gzip = Bun.gzipSync(json, { level: 6 });
+  cache = { at: Date.now(), json, gzip };
+  return cache;
+}
+
+async function getPayload(): Promise<Payload> {
+  const now = Date.now();
+  if (cache && now - cache.at <= CACHE_TTL_MS) return cache;
+  // Recently failed and we have something to serve: skip the retry, serve stale.
+  if (cache && now - failedAt < FAIL_COOLDOWN_MS) return cache;
+  if (!inflight) {
+    inflight = refresh()
+      .catch((err) => {
+        failedAt = Date.now();
+        throw err;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+  }
+  try {
+    return await inflight;
+  } catch (err) {
+    // Refresh failed — serve the last-good payload rather than erroring out.
+    // Only a cold cache (no prior successful load) surfaces the error as a 500.
+    if (cache) return cache;
+    throw err;
+  }
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -199,15 +253,24 @@ const server = Bun.serve({
     }
     if (req.method === "GET" && pathname === "/data") {
       try {
-        if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
-          // Cheap snapshot path first; fall back to per-collection assembly.
-          // Normalize so both paths return the identical shape.
-          const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
-          cache = { at: Date.now(), data: normalize(raw as Record<string, unknown>) };
+        const payload = await getPayload();
+        // gzip shrinks this ~2 MB JSON to ~270 KB. Serve it when the client
+        // advertises support; Vary keeps shared/browser caches correct since
+        // the same URL can return either encoding.
+        const acceptsGzip = (req.headers.get("accept-encoding") ?? "")
+          .toLowerCase()
+          .includes("gzip");
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json;charset=utf-8",
+          "Cache-Control": "public, max-age=300, s-maxage=3600",
+          Vary: "Accept-Encoding",
+          ...CORS,
+        };
+        if (acceptsGzip) {
+          headers["Content-Encoding"] = "gzip";
+          return new Response(payload.gzip, { headers });
         }
-        return Response.json(cache.data, {
-          headers: { "Cache-Control": "public, max-age=300, s-maxage=3600", ...CORS },
-        });
+        return new Response(payload.json, { headers });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return Response.json({ error: message }, { status: 500, headers: CORS });
