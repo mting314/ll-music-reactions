@@ -5,7 +5,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { toDataset, type Dataset } from '@/data/dataset';
+import { type Dataset } from '@/data/dataset';
+import { fetchDataset } from '@/data/fetchDataset';
 
 const DataContext = createContext<Dataset | null>(null);
 
@@ -13,9 +14,6 @@ const DataContext = createContext<Dataset | null>(null);
 // daily) at runtime. There is no bundled fallback by design: the app shows either
 // current data or an honest error — never stale data.
 const DATA_API = import.meta.env.VITE_DATA_API as string | undefined;
-// Bound the wait so a hung/cold-starting API surfaces an error + Retry instead of
-// an indefinite spinner.
-const FETCH_TIMEOUT_MS = 15_000;
 
 export function useDataset(): Dataset {
   const dataset = useContext(DataContext);
@@ -36,39 +34,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!DATA_API) return;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let cancelled = false;
     setError(null);
     setDataset(null);
 
     (async () => {
       try {
-        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`, {
-          signal: controller.signal,
-        });
-        if (!resp.ok) throw new Error(`Data API returned ${resp.status}`);
-        const json = (await resp.json()) as { songs?: unknown };
-        // A 200 with an empty/invalid body would otherwise render a blank-but-
-        // not-errored app; treat it as a failure instead.
-        if (!Array.isArray(json.songs) || json.songs.length === 0) {
-          throw new Error('Data API returned an empty or invalid dataset');
-        }
-        if (!cancelled) setDataset(toDataset(json));
+        const ds = await fetchDataset(DATA_API, { signal: controller.signal });
+        if (!cancelled) setDataset(ds);
       } catch (err) {
-        if (cancelled) return;
-        setError(
-          controller.signal.aborted
-            ? 'The data service timed out.'
-            : err instanceof Error
-              ? err.message
-              : String(err),
-        );
+        if (cancelled) return; // unmounted / superseded by a retry
+        setError(err instanceof Error ? err.message : String(err));
       }
     })();
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
       controller.abort();
     };
   }, [attempt]);
