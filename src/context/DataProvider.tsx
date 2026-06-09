@@ -23,11 +23,12 @@ export function useDataset(): Dataset {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  // When no API is configured, render synchronously from the bundled snapshot
-  // (no loading state) — preserves current behavior.
-  const [dataset, setDataset] = useState<Dataset | null>(
-    DATA_API ? null : bundledDataset,
-  );
+  // Paint immediately from the bundled snapshot — it's baked into the JS at build
+  // time from the data API (fresh as of last deploy) and served via GitHub Pages'
+  // CDN, so it's fast worldwide (incl. Japan) with no cross-region API round trip.
+  // When an API is configured, refresh in the background and swap in live data;
+  // the user never waits on the network for first paint.
+  const [dataset, setDataset] = useState<Dataset>(bundledDataset);
 
   useEffect(() => {
     if (!DATA_API) return;
@@ -40,9 +41,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const json = await resp.json();
         if (!cancelled) setDataset(toDataset(json));
       } catch (err) {
-        // Network failure should never blank the app — fall back.
-        console.warn('Remote data unavailable, using bundled data:', err);
-        if (!cancelled) setDataset(bundledDataset);
+        // Background refresh failed — keep the bundled snapshot already on screen.
+        console.warn('Remote data refresh failed, keeping bundled data:', err);
       }
     })();
 
@@ -50,17 +50,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
-
-  if (!dataset) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#0f0f1e] text-gray-400">
-        <div className="text-center">
-          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-pink-600 border-t-transparent" />
-          <p className="text-sm">Loading Love Live data…</p>
-        </div>
-      </div>
-    );
-  }
 
   return <DataContext.Provider value={dataset}>{children}</DataContext.Provider>;
 }
