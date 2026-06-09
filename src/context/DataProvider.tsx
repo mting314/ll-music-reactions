@@ -5,13 +5,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { bundledDataset, toDataset, type Dataset } from '@/data/dataset';
+import { type Dataset } from '@/data/dataset';
+import { fetchDataset } from '@/data/fetchDataset';
 
 const DataContext = createContext<Dataset | null>(null);
 
-// Source of the dataset. When VITE_DATA_API is set (the Cloud Run data API
-// backed by Firestore, refreshed daily), the app fetches it at runtime;
-// otherwise it uses the bundled snapshot.
+// The dataset is fetched from the Cloud Run data API (Firestore-backed, refreshed
+// daily) at runtime. There is no bundled fallback by design: the app shows either
+// current data or an honest error — never stale data.
 const DATA_API = import.meta.env.VITE_DATA_API as string | undefined;
 
 export function useDataset(): Dataset {
@@ -23,33 +24,76 @@ export function useDataset(): Dataset {
 }
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  // When no API is configured, render synchronously from the bundled snapshot
-  // (no loading state) — preserves current behavior.
-  const [dataset, setDataset] = useState<Dataset | null>(
-    DATA_API ? null : bundledDataset,
-  );
+  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Bump to retry the fetch after a failure.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    // Misconfiguration is handled in render (Retry can't fix a missing URL).
     if (!DATA_API) return;
+
+    const controller = new AbortController();
     let cancelled = false;
+    setError(null);
+    setDataset(null);
 
     (async () => {
       try {
-        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`);
-        if (!resp.ok) throw new Error(`Data API ${resp.status}`);
-        const json = await resp.json();
-        if (!cancelled) setDataset(toDataset(json));
+        const ds = await fetchDataset(DATA_API, { signal: controller.signal });
+        if (!cancelled) setDataset(ds);
       } catch (err) {
-        // Network failure should never blank the app — fall back.
-        console.warn('Remote data unavailable, using bundled data:', err);
-        if (!cancelled) setDataset(bundledDataset);
+        if (cancelled) return; // unmounted / superseded by a retry
+        setError(err instanceof Error ? err.message : String(err));
       }
     })();
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, []);
+  }, [attempt]);
+
+  // Build-time misconfiguration — retrying won't help, so don't offer it.
+  if (!DATA_API) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0f0f1e] text-gray-300">
+        <div className="max-w-sm text-center">
+          <p className="mb-2 text-lg font-semibold text-white">
+            Data service isn’t configured
+          </p>
+          <p className="text-sm text-gray-400">
+            VITE_DATA_API is unset for this build.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error !== null) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0f0f1e] text-gray-300">
+        <div className="max-w-sm text-center">
+          <p className="mb-2 text-lg font-semibold text-white">
+            Couldn’t load Love Live data
+          </p>
+          <p className="mb-5 text-sm text-gray-400">
+            The data service is unreachable right now. Please try again.
+          </p>
+          <button
+            onClick={() => {
+              setError(null);
+              setAttempt((n) => n + 1);
+            }}
+            className="rounded-lg bg-pink-600 px-5 py-2 text-sm font-medium text-white hover:bg-pink-500"
+          >
+            Retry
+          </button>
+          <p className="mt-4 text-xs text-gray-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!dataset) {
     return (

@@ -29,7 +29,6 @@ flowchart LR
     FS[("Firestore<br/>per-entity docs + snapshot")]
     API["Cloud Run · ll-data-api<br/>GET /data (cached)"]
     WEB["Frontend · GitHub Pages<br/>DataProvider"]
-    BUNDLE["bundled src/data<br/>(fallback)"]
 
     SCH -->|triggers| REFRESH
     SECRET -.token.-> REFRESH
@@ -38,13 +37,12 @@ flowchart LR
     WIKI --> REFRESH
     REFRESH -->|write docs + snapshot| FS
     API -->|read snapshot ~4 reads| FS
-    WEB -->|fetch /data| API
-    BUNDLE -.if API unset/unreachable.-> WEB
+    WEB -->|fetch /data at runtime| API
 ```
 
-The frontend fetches `GET /data` when `VITE_DATA_API` is set; otherwise it falls
-back to the bundled `src/data` snapshot, so the app always works (and the live
-site is unaffected until provisioned).
+The frontend fetches `GET /data` from `VITE_DATA_API` at runtime. There is no
+bundled fallback: data is never embedded in the app, and an unreachable (or
+unconfigured) API surfaces an error rather than stale data.
 
 ## Data model
 

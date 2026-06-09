@@ -4,15 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "fetch-snapshot": "bun run scripts/fetch-snapshot.ts",
-    "predev": "bun run fetch-snapshot",
-    "pretypecheck": "bun run fetch-snapshot",
-    "prebuild": "bun run fetch-snapshot",
     "dev": "vite",
     "server": "bun run server/export.ts",
     "lint": "eslint .",
     "typecheck": "tsc -b",
-    "test": "bun test server/ pipeline/",
+    "test": "bun test server/ pipeline/ src/",
     "ci": "bun run lint && bun run typecheck && bun run test",
     "build": "tsc -b && vite build",
     "preview": "vite preview"

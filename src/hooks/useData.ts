@@ -12,9 +12,9 @@ import { useDataset } from '@/context/DataProvider';
 import type { BuildInfo } from '@/data/dataset';
 import clipManifest from '@/data/clips-manifest.json';
 
-// Song/artist/discography/series/performance data now comes from the Dataset
-// (DB-backed API at runtime, or the bundled snapshot as a fallback) via
-// DataProvider. Reaction clips remain bundled — they're our own assets.
+// Song/artist/discography/series/performance data comes from the Dataset
+// (fetched from the DB-backed API at runtime) via DataProvider. Reaction clips
+// remain bundled — they're our own assets, not external catalog data.
 
 export function useSongs(): Song[] {
   return useDataset().songs;
