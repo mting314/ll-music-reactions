@@ -1,0 +1,47 @@
+name: Publish data to Firebase Hosting
+
+# Mirrors the dataset from the Cloud Run data API to Firebase Hosting's global CDN
+# once a day (after the daily Firestore refresh at 03:00 UTC), so the frontend can
+# fetch it fast worldwide. Also runnable on demand.
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC, ~1h after the data-refresh job
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Don't let two publishes overlap.
+concurrency:
+  group: publish-data
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch current dataset from the data API
+        env:
+          DATA_API: https://ll-data-api-278890546984.us-central1.run.app/data
+        run: |
+          mkdir -p public-data
+          curl -sSf "$DATA_API" -o public-data/dataset.json
+          # Refuse to publish a garbage/empty payload (mirror the frontend's guard).
+          node -e '
+            const d = require("./public-data/dataset.json");
+            if (!Array.isArray(d.songs) || d.songs.length === 0) {
+              console.error("dataset.json has no songs — refusing to publish");
+              process.exit(1);
+            }
+            console.log("songs:", d.songs.length, "generatedAt:", d.build?.generatedAt);
+          '
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: future-name-201021
+          channelId: live

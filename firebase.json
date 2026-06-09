@@ -6,16 +6,8 @@
       {
         "source": "dataset.json",
         "headers": [
-          {
-            "comment": "Always revalidate so a daily re-deploy is picked up immediately; Firebase's edge serves it fast and returns 304 when unchanged.",
-            "key": "Cache-Control",
-            "value": "no-cache"
-          },
-          {
-            "comment": "The app is served from a different origin (GitHub Pages), so the cross-origin fetch needs CORS.",
-            "key": "Access-Control-Allow-Origin",
-            "value": "*"
-          }
+          { "key": "Cache-Control", "value": "no-cache" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" }
         ]
       }
     ]
