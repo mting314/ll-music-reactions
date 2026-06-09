@@ -40,11 +40,13 @@ flowchart LR
     WEB -->|fetch /data at runtime| API
 ```
 
-The frontend fetches the dataset from `VITE_DATA_URL` at runtime (the Cloud Run
-`GET /data`, or — after cutover — a static `dataset.json` on Firebase Hosting's
-global CDN; same shape). There is no bundled fallback: data is never embedded in
-the app, and an unreachable (or unconfigured) URL surfaces an error rather than
-stale data.
+The Cloud Run `GET /data` is the source the daily mirror reads. The frontend
+itself fetches **per-entity JSON files** from `VITE_DATA_BASE` at runtime — the
+[`ll-music-data`](https://github.com/mting314/ll-music-data) repo, served via
+GitHub Pages' global CDN (a daily GitHub Action pulls `GET /data` and commits
+`songs.json`, `artists.json`, …). There is no bundled fallback: data is never
+embedded in the app, and an unreachable (or unconfigured) base surfaces an error
+rather than stale data.
 
 ## Data model
 
@@ -166,7 +168,7 @@ reads it as `GITHUB_TOKEN` (redacted from all logs). The public
 export GITHUB_TOKEN='<PAT with read access to ll-sorter-scripts>'
 ./pipeline/setup-gcp.sh     # Firestore + secret + service + job + scheduler, runs job once
 # then point the frontend at the data URL and redeploy Pages:
-#   .env.production -> VITE_DATA_URL=https://ll-data-api-XXXX.us-central1.run.app/data
+#   .env.production -> VITE_DATA_BASE=https://<user>.github.io/ll-music-data
 ```
 
 ## Local development

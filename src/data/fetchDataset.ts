@@ -2,23 +2,37 @@ import { toDataset, type Dataset } from './dataset';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+// The per-entity files published to the data CDN (the ll-music-data repo, served
+// via GitHub Pages). Each field of the Dataset is its own file, fetched in
+// parallel and reassembled — easier to inspect/serve, and sets up lazy loading.
+const FILES = [
+  'songs',
+  'artists',
+  'discographies',
+  'seriesInfo',
+  'seriesNames',
+  'performances',
+  'setlists',
+  'build',
+] as const;
+
 export interface FetchDatasetOptions {
-  // Abort the request after this long so a hung/cold-starting API surfaces an
-  // error instead of hanging forever.
+  // Abort the request after this long so a hung/cold CDN surfaces an error
+  // instead of hanging forever.
   timeoutMs?: number;
   // Caller-controlled signal for lifecycle cancellation (e.g. React unmount/retry).
   signal?: AbortSignal;
 }
 
-// Fetches the dataset JSON from `dataUrl` at runtime. The URL can point at the
-// Cloud Run data API (`…/data`) or a static file on a CDN (e.g. Firebase Hosting
-// `…/dataset.json`) — both return the same dataset shape, so cutover is just an
-// env change. Throws on HTTP error, an empty/invalid payload, or timeout; there
-// is no bundled fallback, so callers surface these as an error state.
+// Fetches the per-entity JSON files from `baseUrl` (e.g. a GitHub Pages site) in
+// parallel and assembles them into a Dataset. Throws on any HTTP error, an
+// empty/invalid payload, or timeout — there is no bundled fallback, so callers
+// surface these as an error state rather than showing stale data.
 export async function fetchDataset(
-  dataUrl: string,
+  baseUrl: string,
   { timeoutMs = DEFAULT_TIMEOUT_MS, signal }: FetchDatasetOptions = {},
 ): Promise<Dataset> {
+  const base = baseUrl.replace(/\/$/, '');
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -34,15 +48,22 @@ export async function fetchDataset(
   }
 
   try {
-    const resp = await fetch(dataUrl, { signal: controller.signal });
-    if (!resp.ok) throw new Error(`Data API returned ${resp.status}`);
-    const json = (await resp.json()) as { songs?: unknown };
-    // A 200 with an empty/invalid body would otherwise render a blank-but-not-
-    // errored app; treat it as a failure instead.
-    if (!Array.isArray(json.songs) || json.songs.length === 0) {
-      throw new Error('Data API returned an empty or invalid dataset');
+    const parts = await Promise.all(
+      FILES.map(async (field) => {
+        const resp = await fetch(`${base}/${field}.json`, {
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error(`${field}.json returned ${resp.status}`);
+        return [field, await resp.json()] as const;
+      }),
+    );
+    const raw = Object.fromEntries(parts) as Record<string, unknown>;
+    // A missing/empty songs file would otherwise render a blank-but-not-errored
+    // app; treat it as a failure instead.
+    if (!Array.isArray(raw.songs) || raw.songs.length === 0) {
+      throw new Error('Dataset has an empty or invalid songs file');
     }
-    return toDataset(json);
+    return toDataset(raw);
   } catch (err) {
     // Distinguish our timeout from a caller abort or a real fetch/parse error.
     if (timedOut) throw new Error('The data service timed out.');
