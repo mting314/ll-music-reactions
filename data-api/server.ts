@@ -180,26 +180,40 @@ function normalize(d: Raw) {
   };
 }
 
-// Cache holds the serialized payload in both forms so we serialize and
-// compress once per refresh, not per request. gzip uses max level since the
-// result is reused for every request over the cache window.
+// In-memory cache of the assembled payload, held in both serialized forms so we
+// serialize and gzip once per refresh, not per request.
 interface Payload {
   at: number;
   json: string;
   gzip: Uint8Array;
 }
 let cache: Payload | null = null;
+// In-flight refresh, so a burst of requests against a cold/expired cache shares
+// one Firestore assembly + compression instead of running one per request.
+let inflight: Promise<Payload> | null = null;
 
-async function getPayload(): Promise<Payload> {
-  if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
-    // Cheap snapshot path first; fall back to per-collection assembly.
-    // Normalize so both paths return the identical shape.
-    const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
-    const json = JSON.stringify(normalize(raw as Record<string, unknown>));
-    const gzip = Bun.gzipSync(new TextEncoder().encode(json), { level: 9 });
-    cache = { at: Date.now(), json, gzip };
-  }
+async function refresh(): Promise<Payload> {
+  // Cheap snapshot path first; fall back to per-collection assembly.
+  // Normalize so both paths return the identical shape.
+  const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
+  const json = JSON.stringify(normalize(raw as Record<string, unknown>));
+  // App-layer gzip (~2 MB -> ~270 KB): the Google Frontend does NOT compress
+  // this response, so we do it here. Bun.gzipSync is synchronous, but with the
+  // in-flight lock it runs once per refresh (~13 ms). Default level — level 9
+  // ~doubles CPU for only ~5% fewer bytes, not worth it for a reused result.
+  const gzip = Bun.gzipSync(json, { level: 6 });
+  cache = { at: Date.now(), json, gzip };
   return cache;
+}
+
+function getPayload(): Promise<Payload> {
+  if (cache && Date.now() - cache.at <= CACHE_TTL_MS) return Promise.resolve(cache);
+  if (!inflight) {
+    inflight = refresh().finally(() => {
+      inflight = null;
+    });
+  }
+  return inflight;
 }
 
 const CORS = {
