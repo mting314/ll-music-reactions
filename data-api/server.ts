@@ -180,7 +180,27 @@ function normalize(d: Raw) {
   };
 }
 
-let cache: { at: number; data: unknown } | null = null;
+// Cache holds the serialized payload in both forms so we serialize and
+// compress once per refresh, not per request. gzip uses max level since the
+// result is reused for every request over the cache window.
+interface Payload {
+  at: number;
+  json: string;
+  gzip: Uint8Array;
+}
+let cache: Payload | null = null;
+
+async function getPayload(): Promise<Payload> {
+  if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
+    // Cheap snapshot path first; fall back to per-collection assembly.
+    // Normalize so both paths return the identical shape.
+    const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
+    const json = JSON.stringify(normalize(raw as Record<string, unknown>));
+    const gzip = Bun.gzipSync(new TextEncoder().encode(json), { level: 9 });
+    cache = { at: Date.now(), json, gzip };
+  }
+  return cache;
+}
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -199,15 +219,24 @@ const server = Bun.serve({
     }
     if (req.method === "GET" && pathname === "/data") {
       try {
-        if (!cache || Date.now() - cache.at > CACHE_TTL_MS) {
-          // Cheap snapshot path first; fall back to per-collection assembly.
-          // Normalize so both paths return the identical shape.
-          const raw = (await readSnapshot()) ?? (await buildDatasetFromCollections());
-          cache = { at: Date.now(), data: normalize(raw as Record<string, unknown>) };
+        const payload = await getPayload();
+        // gzip shrinks this ~2 MB JSON to ~270 KB. Serve it when the client
+        // advertises support; Vary keeps shared/browser caches correct since
+        // the same URL can return either encoding.
+        const acceptsGzip = (req.headers.get("accept-encoding") ?? "")
+          .toLowerCase()
+          .includes("gzip");
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json;charset=utf-8",
+          "Cache-Control": "public, max-age=300, s-maxage=3600",
+          Vary: "Accept-Encoding",
+          ...CORS,
+        };
+        if (acceptsGzip) {
+          headers["Content-Encoding"] = "gzip";
+          return new Response(payload.gzip, { headers });
         }
-        return Response.json(cache.data, {
-          headers: { "Cache-Control": "public, max-age=300, s-maxage=3600", ...CORS },
-        });
+        return new Response(payload.json, { headers });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return Response.json({ error: message }, { status: 500, headers: CORS });
