@@ -46,8 +46,8 @@ jobs:
         run: bun install
 
       - name: Build
-        # .env.production supplies VITE_DATA_API / VITE_EXPORT_API (Cloud Run URLs).
-        # No data is bundled — the app fetches it from the data API at runtime.
+        # .env.production supplies VITE_DATA_URL / VITE_EXPORT_API.
+        # No data is bundled — the app fetches it from VITE_DATA_URL at runtime.
         run: bun run build
 
       - uses: actions/upload-pages-artifact@v3

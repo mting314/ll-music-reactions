@@ -68,10 +68,12 @@ consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-so
 
 The app no longer hardcodes or bundles this data. A **Firestore** database is
 refreshed **daily** by a Cloud Run Job running those same scrapers, and the
-frontend fetches it entirely at runtime from a Cloud Run data API
-(`VITE_DATA_API`). There is no bundled fallback: if the API is unreachable the
-app shows an error (with retry) rather than stale data. Firestore stores each
-entity as a queryable document and is ~$0/month at this scale.
+frontend fetches it entirely at runtime from `VITE_DATA_URL` (today the Cloud Run
+data API's `/data`; the planned cutover serves a static `dataset.json` from
+Firebase Hosting's global CDN — same shape, just an env change). There is no
+bundled fallback: if the data URL is unreachable the app shows an error (with
+retry) rather than stale data. Firestore stores each entity as a queryable
+document and is ~$0/month at this scale.
 
 ```mermaid
 flowchart LR

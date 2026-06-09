@@ -29,15 +29,15 @@ describe('fetchDataset — happy path', () => {
     }
   });
 
-  test('normalizes a trailing slash in the base URL (hits /data once)', async () => {
+  test('fetches the exact URL it is given (API endpoint or static file)', async () => {
     let path = '';
     const s = serve((req) => {
       path = new URL(req.url).pathname;
       return Response.json(VALID);
     });
     try {
-      await fetchDataset(`http://localhost:${s.port}/`);
-      expect(path).toBe('/data');
+      await fetchDataset(`http://localhost:${s.port}/dataset.json`);
+      expect(path).toBe('/dataset.json');
     } finally {
       s.stop(true);
     }
