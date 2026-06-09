@@ -23,8 +23,6 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      # No snapshot step: ESLint here is not type-aware, so it doesn't need
-      # the dataset (and we avoid failing lint on a transient data-API blip).
       - run: bun run lint
 
   typecheck:
@@ -35,10 +33,6 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - name: Generate data snapshot
-        env:
-          FORCE_SNAPSHOT: '1'
-        run: bun run fetch-snapshot
       - run: bun run typecheck
 
   test:
@@ -59,8 +53,4 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - name: Generate data snapshot
-        env:
-          FORCE_SNAPSHOT: '1'
-        run: bun run fetch-snapshot
       - run: bun run build

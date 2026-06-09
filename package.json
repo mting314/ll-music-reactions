@@ -4,10 +4,6 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "fetch-snapshot": "bun run scripts/fetch-snapshot.ts",
-    "predev": "bun run fetch-snapshot",
-    "pretypecheck": "bun run fetch-snapshot",
-    "prebuild": "bun run fetch-snapshot",
     "dev": "vite",
     "server": "bun run server/export.ts",
     "lint": "eslint .",
