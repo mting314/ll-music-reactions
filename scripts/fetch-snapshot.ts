@@ -12,7 +12,13 @@
 //   - On fetch failure: keeps an existing snapshot when not forced; otherwise
 //     exits non-zero so CI fails rather than shipping an empty app.
 
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 
 const SNAPSHOT_PATH = resolve(import.meta.dir, '../src/data/snapshot.json');
@@ -66,12 +72,22 @@ try {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const json = (await resp.json()) as { songs?: unknown };
-  // Sanity-check the payload so we never bake a garbage/empty snapshot.
-  if (!json || typeof json !== 'object' || !Array.isArray(json.songs)) {
-    throw new Error('payload missing expected "songs" array');
+  // Sanity-check the payload so we never bake a garbage/empty snapshot. A valid
+  // shape with zero songs is treated as a bad refresh, not a real dataset.
+  if (
+    !json ||
+    typeof json !== 'object' ||
+    !Array.isArray(json.songs) ||
+    json.songs.length === 0
+  ) {
+    throw new Error('payload missing a non-empty "songs" array');
   }
   const body = JSON.stringify(json);
-  writeFileSync(SNAPSHOT_PATH, body);
+  // Write atomically (temp + rename) so a crash mid-write can't leave a
+  // truncated snapshot that a later run would treat as a valid fresh file.
+  const tmp = `${SNAPSHOT_PATH}.tmp`;
+  writeFileSync(tmp, body);
+  renameSync(tmp, SNAPSHOT_PATH);
   console.log(
     `[fetch-snapshot] Wrote snapshot.json (${Math.round(
       Buffer.byteLength(body) / 1024,

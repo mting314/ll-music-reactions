@@ -12,3 +12,4 @@ pipeline/.env
 # Never committed; regenerated on every build/deploy so the repo never holds
 # stale data.
 src/data/snapshot.json
+src/data/snapshot.json.tmp
