@@ -16,6 +16,7 @@ import { join } from "path";
 import { buildDataset, datasetCounts } from "./build-dataset";
 import { loadDataset } from "./load-firestore";
 import { getProjectId } from "./firestore";
+import { publishToHosting } from "./publish-hosting";
 
 const SCRAPER_REPO =
   process.env.SCRAPER_REPO ?? "https://github.com/hamzaabamboo/ll-sorter-scripts";
@@ -87,11 +88,16 @@ async function main() {
 
     console.log("Building dataset...");
     const dataset = await buildDataset(dataDir, generatedAt);
-    console.log("Counts:", datasetCounts(dataset));
+    const counts = datasetCounts(dataset);
+    console.log("Counts:", counts);
 
     const project = await getProjectId();
     console.log(`Writing to Firestore (project ${project})...`);
-    const counts = await loadDataset(project, dataset);
+    await loadDataset(project, dataset);
+
+    // Publish a static dataset.json to Firebase Hosting's CDN (opt-in via
+    // PUBLISH_HOSTING=1; no-op otherwise). See pipeline/publish-hosting.ts.
+    await publishToHosting(dataset, counts);
 
     console.log("Refresh complete:", counts);
   } catch (err) {
