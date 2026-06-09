@@ -66,11 +66,12 @@ Song discography data originates from the Love Live data scrapers
 ([hamzaabamboo/ll-sorter-scripts](https://github.com/hamzaabamboo/ll-sorter-scripts),
 consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
 
-The app no longer hardcodes this data. A **Firestore** database is refreshed
-**daily** by a Cloud Run Job running those same scrapers, and the frontend
-fetches it at runtime from a Cloud Run data API (`VITE_DATA_API`), falling back
-to the bundled `src/data` snapshot when it isn't configured. Firestore stores
-each entity as a queryable document and is ~$0/month at this scale.
+The app no longer hardcodes or bundles this data. A **Firestore** database is
+refreshed **daily** by a Cloud Run Job running those same scrapers, and the
+frontend fetches it entirely at runtime from a Cloud Run data API
+(`VITE_DATA_API`). There is no bundled fallback: if the API is unreachable the
+app shows an error (with retry) rather than stale data. Firestore stores each
+entity as a queryable document and is ~$0/month at this scale.
 
 ```mermaid
 flowchart LR
@@ -78,8 +79,7 @@ flowchart LR
     SCRIPTS["ll-sorter-scripts<br/>+ Fandom wiki"] -.-> JOB
     JOB -->|write docs + snapshot| FS[("Firestore")]
     API["Cloud Run<br/>data API · /data"] -->|read snapshot| FS
-    WEB["Frontend<br/>(GitHub Pages)"] -->|fetch /data| API
-    BUNDLE["bundled src/data"] -.fallback.-> WEB
+    WEB["Frontend<br/>(GitHub Pages)"] -->|fetch /data at runtime| API
 ```
 
 See [`pipeline/README.md`](pipeline/README.md) for the full architecture and the

@@ -13,6 +13,9 @@ const DataContext = createContext<Dataset | null>(null);
 // daily) at runtime. There is no bundled fallback by design: the app shows either
 // current data or an honest error — never stale data.
 const DATA_API = import.meta.env.VITE_DATA_API as string | undefined;
+// Bound the wait so a hung/cold-starting API surfaces an error + Retry instead of
+// an indefinite spinner.
+const FETCH_TIMEOUT_MS = 15_000;
 
 export function useDataset(): Dataset {
   const dataset = useContext(DataContext);
@@ -29,32 +32,62 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!DATA_API) {
-      setError('Data API not configured (VITE_DATA_API is unset).');
-      return;
-    }
+    // Misconfiguration is handled in render (Retry can't fix a missing URL).
+    if (!DATA_API) return;
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let cancelled = false;
     setError(null);
     setDataset(null);
 
     (async () => {
       try {
-        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`);
+        const resp = await fetch(`${DATA_API.replace(/\/$/, '')}/data`, {
+          signal: controller.signal,
+        });
         if (!resp.ok) throw new Error(`Data API returned ${resp.status}`);
-        const json = await resp.json();
+        const json = (await resp.json()) as { songs?: unknown };
+        // A 200 with an empty/invalid body would otherwise render a blank-but-
+        // not-errored app; treat it as a failure instead.
+        if (!Array.isArray(json.songs) || json.songs.length === 0) {
+          throw new Error('Data API returned an empty or invalid dataset');
+        }
         if (!cancelled) setDataset(toDataset(json));
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
+        if (cancelled) return;
+        setError(
+          controller.signal.aborted
+            ? 'The data service timed out.'
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
       }
     })();
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
   }, [attempt]);
+
+  // Build-time misconfiguration — retrying won't help, so don't offer it.
+  if (!DATA_API) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0f0f1e] text-gray-300">
+        <div className="max-w-sm text-center">
+          <p className="mb-2 text-lg font-semibold text-white">
+            Data service isn’t configured
+          </p>
+          <p className="text-sm text-gray-400">
+            VITE_DATA_API is unset for this build.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (error !== null) {
     return (
@@ -67,7 +100,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
             The data service is unreachable right now. Please try again.
           </p>
           <button
-            onClick={() => setAttempt((n) => n + 1)}
+            onClick={() => {
+              setError(null);
+              setAttempt((n) => n + 1);
+            }}
             className="rounded-lg bg-pink-600 px-5 py-2 text-sm font-medium text-white hover:bg-pink-500"
           >
             Retry
