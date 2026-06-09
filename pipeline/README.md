@@ -40,9 +40,11 @@ flowchart LR
     WEB -->|fetch /data at runtime| API
 ```
 
-The frontend fetches `GET /data` from `VITE_DATA_API` at runtime. There is no
-bundled fallback: data is never embedded in the app, and an unreachable (or
-unconfigured) API surfaces an error rather than stale data.
+The frontend fetches the dataset from `VITE_DATA_URL` at runtime (the Cloud Run
+`GET /data`, or — after cutover — a static `dataset.json` on Firebase Hosting's
+global CDN; same shape). There is no bundled fallback: data is never embedded in
+the app, and an unreachable (or unconfigured) URL surfaces an error rather than
+stale data.
 
 ## Data model
 
@@ -163,8 +165,8 @@ reads it as `GITHUB_TOKEN` (redacted from all logs). The public
 ```bash
 export GITHUB_TOKEN='<PAT with read access to ll-sorter-scripts>'
 ./pipeline/setup-gcp.sh     # Firestore + secret + service + job + scheduler, runs job once
-# then point the frontend at the data API and redeploy Pages:
-#   .env.production -> VITE_DATA_API=https://ll-data-api-XXXX.us-central1.run.app
+# then point the frontend at the data URL and redeploy Pages:
+#   .env.production -> VITE_DATA_URL=https://ll-data-api-XXXX.us-central1.run.app/data
 ```
 
 ## Local development

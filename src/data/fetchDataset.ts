@@ -10,11 +10,13 @@ export interface FetchDatasetOptions {
   signal?: AbortSignal;
 }
 
-// Fetches the dataset from the data API at runtime. Throws on HTTP error, an
-// empty/invalid payload, or timeout — there is no bundled fallback, so callers
-// surface these as an error state rather than showing stale data.
+// Fetches the dataset JSON from `dataUrl` at runtime. The URL can point at the
+// Cloud Run data API (`…/data`) or a static file on a CDN (e.g. Firebase Hosting
+// `…/dataset.json`) — both return the same dataset shape, so cutover is just an
+// env change. Throws on HTTP error, an empty/invalid payload, or timeout; there
+// is no bundled fallback, so callers surface these as an error state.
 export async function fetchDataset(
-  apiBase: string,
+  dataUrl: string,
   { timeoutMs = DEFAULT_TIMEOUT_MS, signal }: FetchDatasetOptions = {},
 ): Promise<Dataset> {
   const controller = new AbortController();
@@ -32,9 +34,7 @@ export async function fetchDataset(
   }
 
   try {
-    const resp = await fetch(`${apiBase.replace(/\/$/, '')}/data`, {
-      signal: controller.signal,
-    });
+    const resp = await fetch(dataUrl, { signal: controller.signal });
     if (!resp.ok) throw new Error(`Data API returned ${resp.status}`);
     const json = (await resp.json()) as { songs?: unknown };
     // A 200 with an empty/invalid body would otherwise render a blank-but-not-
