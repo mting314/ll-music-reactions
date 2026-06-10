@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Header } from '@/components/layout/Header';
+import { Header, type AppView } from '@/components/layout/Header';
+import { DataViewer } from '@/components/data-viewer/DataViewer';
 import { Timeline } from '@/components/timeline/Timeline';
 import { SongPicker } from '@/components/song-picker/SongPicker';
 import { ClipPicker } from '@/components/clip-picker/ClipPicker';
@@ -34,6 +35,7 @@ export default function App() {
   const videoExport = useVideoExport();
   const [picker, setPicker] = useState<PickerMode>({ type: 'none' });
   const [showExport, setShowExport] = useState(false);
+  const [view, setView] = useState<AppView>('builder');
 
   const songMap = new Map(songs.map((s) => [s.id, s]));
 
@@ -59,6 +61,8 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col">
       <Header
+        view={view}
+        onChangeView={setView}
         onLoadSetlist={() => setPicker({ type: 'setlist' })}
         onPreview={() => setPicker({ type: 'preview' })}
         onExport={() => setShowExport(true)}
@@ -69,6 +73,10 @@ export default function App() {
         hasEntries={timeline.entries.length > 0}
       />
 
+      {view === 'data' && <DataViewer />}
+
+      {view === 'builder' && (
+      <>
       <main className="flex min-h-0 flex-1">
         {picker.type === 'song' && (
           <div className="w-96 border-r border-gray-700 overflow-y-auto">
@@ -177,6 +185,8 @@ export default function App() {
           }
           onDismiss={() => setShowExport(false)}
         />
+      )}
+      </>
       )}
     </div>
   );
