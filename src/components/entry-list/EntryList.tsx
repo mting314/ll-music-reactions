@@ -111,16 +111,17 @@ function SortableRow({
       style={style}
       className="group relative flex items-center gap-2 rounded-lg bg-gray-800/60 px-2 py-3 sm:gap-4 sm:px-4"
     >
-      {/* drag handle — only this element starts a drag, so the buttons stay clickable */}
-      <button
+      {/* drag handle — only this element starts a drag, so the buttons stay
+          clickable. A div (not a button) matches Timeline and avoids a native
+          button's default submit type + redundant ARIA. */}
+      <div
         {...attributes}
         {...listeners}
         className="shrink-0 cursor-grab touch-none px-1 text-gray-600 hover:text-gray-300 active:cursor-grabbing"
         title="Drag to reorder"
-        aria-label="Drag to reorder"
       >
         ⠿
-      </button>
+      </div>
 
       <span className="w-5 shrink-0 text-center text-sm text-gray-500">
         {index + 1}
