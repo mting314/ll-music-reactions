@@ -56,10 +56,6 @@ describe('matchSongFilter — type', () => {
     // OR within the type section
     expect(matchSongFilter(groupSong, f({ types: ['solo', 'group'] }), artistMap)).toBe(true);
   });
-
-  test('type filter is skipped when no artist map is provided', () => {
-    expect(matchSongFilter(groupSong, f({ types: ['group'] }))).toBe(true);
-  });
 });
 
 describe('matchSongFilter — series / artist / year', () => {
@@ -70,16 +66,16 @@ describe('matchSongFilter — series / artist / year', () => {
   });
 
   test('series', () => {
-    expect(matchSongFilter(s, f({ series: [1] }))).toBe(true);
-    expect(matchSongFilter(s, f({ series: [2] }))).toBe(false);
+    expect(matchSongFilter(s, f({ series: [1] }), artistMap)).toBe(true);
+    expect(matchSongFilter(s, f({ series: [2] }), artistMap)).toBe(false);
   });
   test('artist', () => {
-    expect(matchSongFilter(s, f({ artists: ['3'] }))).toBe(true);
-    expect(matchSongFilter(s, f({ artists: ['1'] }))).toBe(false);
+    expect(matchSongFilter(s, f({ artists: ['3'] }), artistMap)).toBe(true);
+    expect(matchSongFilter(s, f({ artists: ['1'] }), artistMap)).toBe(false);
   });
   test('year', () => {
-    expect(matchSongFilter(s, f({ years: [2015] }))).toBe(true);
-    expect(matchSongFilter(s, f({ years: [2016] }))).toBe(false);
+    expect(matchSongFilter(s, f({ years: [2015] }), artistMap)).toBe(true);
+    expect(matchSongFilter(s, f({ years: [2016] }), artistMap)).toBe(false);
   });
 });
 

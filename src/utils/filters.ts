@@ -22,7 +22,7 @@ const GROUP_NAMES = new Set<string>([
 // Classify a single artist as solo / group / unit.
 function artistType(artist: Artist): SongType {
   if (GROUP_NAMES.has(artist.name)) return 'group';
-  if ((artist.characters?.length ?? 0) <= 1) return 'solo';
+  if (artist.characters?.length === 1) return 'solo';
   return 'unit';
 }
 
@@ -42,7 +42,7 @@ export function getSongTypes(
 export function matchSongFilter(
   song: Song,
   filter: SongFilter,
-  artists?: Map<string, Artist>,
+  artists: Map<string, Artist>,
 ): boolean {
   if (
     filter.series.length > 0 &&
@@ -59,13 +59,16 @@ export function matchSongFilter(
   }
 
   if (filter.years.length > 0) {
-    const songYear = new Date(song.releasedOn).getFullYear();
+    // Parse the year from the string directly — new Date(...).getFullYear()
+    // reads local time and bucket Jan-1 releases into the previous year for
+    // viewers behind UTC.
+    const songYear = Number(song.releasedOn?.substring(0, 4));
     if (!filter.years.includes(songYear)) {
       return false;
     }
   }
 
-  if (filter.types.length > 0 && artists) {
+  if (filter.types.length > 0) {
     const songTypes = getSongTypes(song, artists);
     if (!filter.types.some((t) => songTypes.has(t))) {
       return false;
@@ -79,7 +82,8 @@ export function getAvailableYears(songs: Song[]): number[] {
   const years = new Set<number>();
   for (const song of songs) {
     if (song.releasedOn) {
-      years.add(new Date(song.releasedOn).getFullYear());
+      const year = Number(song.releasedOn.substring(0, 4));
+      if (year) years.add(year);
     }
   }
   return Array.from(years).sort((a, b) => b - a);
