@@ -20,8 +20,10 @@ export function SongPicker({
   onSelect,
   onClose,
 }: SongPickerProps) {
-  const { query, setQuery, filter, setFilter, results } =
-    useSongSearch(songs);
+  const { query, setQuery, filter, setFilter, results } = useSongSearch(
+    songs,
+    artistMap,
+  );
 
   return (
     <div className="flex h-full flex-col bg-[#1a1a2e]">
@@ -47,6 +49,7 @@ export function SongPicker({
       </div>
 
       <SongFilters
+        songs={songs}
         series={series}
         artistMap={artistMap}
         filter={filter}
