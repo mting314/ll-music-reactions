@@ -5,6 +5,7 @@ export type AppView = 'builder' | 'data';
 interface HeaderProps {
   view: AppView;
   onChangeView: (view: AppView) => void;
+  onNewBuild: () => void;
   onLoadSetlist: () => void;
   onOpenProjects: () => void;
   onPreview: () => void;
@@ -19,6 +20,7 @@ interface HeaderProps {
 export function Header({
   view,
   onChangeView,
+  onNewBuild,
   onLoadSetlist,
   onOpenProjects,
   onPreview,
@@ -88,6 +90,12 @@ export function Header({
                 ↪
               </button>
             </div>
+            <button
+              onClick={onNewBuild}
+              className="rounded px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+            >
+              New
+            </button>
             <button
               onClick={onOpenProjects}
               className="rounded px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"

@@ -65,6 +65,16 @@ export default function App() {
       <Header
         view={view}
         onChangeView={setView}
+        onNewBuild={() => {
+          if (
+            timeline.entries.length === 0 ||
+            window.confirm(
+              'Start a new build? The current items will be cleared (you can Undo, or Save first).',
+            )
+          ) {
+            timeline.clearTimeline();
+          }
+        }}
         onLoadSetlist={() => setPicker({ type: 'setlist' })}
         onOpenProjects={() => setShowProjects(true)}
         onPreview={() => setPicker({ type: 'preview' })}
