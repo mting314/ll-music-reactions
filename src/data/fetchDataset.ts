@@ -65,6 +65,9 @@ export async function fetchDataset(
     }
     return toDataset(raw);
   } catch (err) {
+    // One file failed → cancel the still-in-flight sibling fetches so a single
+    // failure doesn't leave 7 requests running until they time out.
+    controller.abort();
     // Distinguish our timeout from a caller abort or a real fetch/parse error.
     if (timedOut) throw new Error('The data service timed out.');
     throw err;
