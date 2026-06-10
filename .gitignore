@@ -7,10 +7,3 @@ public/.DS_Store
 tsconfig.tsbuildinfo
 pipeline/.work
 pipeline/.env
-
-# Firebase Hosting publish dir — dataset.json is fetched at publish time, not committed.
-public-data
-
-# Firebase CLI local artifacts.
-firebase-debug.log
-.firebase

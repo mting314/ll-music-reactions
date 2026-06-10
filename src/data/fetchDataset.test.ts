@@ -2,7 +2,7 @@ import { test, expect, describe } from 'bun:test';
 import type { Server } from 'bun';
 import { fetchDataset } from './fetchDataset';
 
-const VALID = {
+const VALID: Record<string, unknown> = {
   songs: [{ id: '1' }, { id: '2' }],
   artists: [],
   discographies: [],
@@ -13,13 +13,36 @@ const VALID = {
   build: { generatedAt: '2026-06-09T00:00:00Z' },
 };
 
-function serve(handler: (req: Request) => Response | Promise<Response>): Server {
-  return Bun.serve({ port: 0, fetch: handler });
+interface StubOpts {
+  data?: Record<string, unknown>;
+  status?: Record<string, number>; // field -> HTTP status override
+  body?: Record<string, string>; // field -> raw (e.g. malformed) body
+  delayMs?: number; // delay every response
+}
+
+// Serves each Dataset field at /<field>.json, mirroring the data CDN layout.
+function serveDataset(opts: StubOpts = {}): Server {
+  const data = opts.data ?? VALID;
+  return Bun.serve({
+    port: 0,
+    async fetch(req) {
+      if (opts.delayMs) await Bun.sleep(opts.delayMs);
+      const field = new URL(req.url).pathname.replace(/^\//, '').replace(/\.json$/, '');
+      if (opts.status?.[field]) return new Response('x', { status: opts.status[field] });
+      if (opts.body && field in opts.body) {
+        return new Response(opts.body[field], {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (field in data) return Response.json(data[field]);
+      return new Response('not found', { status: 404 });
+    },
+  });
 }
 
 describe('fetchDataset — happy path', () => {
-  test('returns a coerced Dataset on a valid 200', async () => {
-    const s = serve(() => Response.json(VALID));
+  test('fetches per-entity files and assembles a Dataset', async () => {
+    const s = serveDataset();
     try {
       const d = await fetchDataset(`http://localhost:${s.port}`);
       expect(d.songs).toHaveLength(2);
@@ -29,60 +52,45 @@ describe('fetchDataset — happy path', () => {
     }
   });
 
-  test('fetches the exact URL it is given (API endpoint or static file)', async () => {
-    let path = '';
-    const s = serve((req) => {
-      path = new URL(req.url).pathname;
-      return Response.json(VALID);
-    });
+  test('tolerates a trailing slash on the base URL', async () => {
+    const s = serveDataset();
     try {
-      await fetchDataset(`http://localhost:${s.port}/dataset.json`);
-      expect(path).toBe('/dataset.json');
+      const d = await fetchDataset(`http://localhost:${s.port}/`);
+      expect(d.songs).toHaveLength(2);
     } finally {
       s.stop(true);
     }
   });
 });
 
-describe('fetchDataset — API failure paths', () => {
-  test('throws on HTTP 500', async () => {
-    const s = serve(() => new Response('x', { status: 500 }));
+describe('fetchDataset — failure paths', () => {
+  test('throws if any entity file 404s', async () => {
+    const s = serveDataset({ status: { artists: 404 } });
     try {
       await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow(
-        /returned 500/,
+        /artists\.json returned 404/,
       );
     } finally {
       s.stop(true);
     }
   });
 
-  test('throws on HTTP 404', async () => {
-    const s = serve(() => new Response('x', { status: 404 }));
+  test('throws on a 500 for any entity file', async () => {
+    const s = serveDataset({ status: { setlists: 500 } });
     try {
       await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow(
-        /returned 404/,
+        /setlists\.json returned 500/,
       );
     } finally {
       s.stop(true);
     }
   });
 
-  test('throws on a 200 with an empty songs array', async () => {
-    const s = serve(() => Response.json({ ...VALID, songs: [] }));
+  test('throws when songs is empty', async () => {
+    const s = serveDataset({ data: { ...VALID, songs: [] } });
     try {
       await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow(
-        /empty or invalid/,
-      );
-    } finally {
-      s.stop(true);
-    }
-  });
-
-  test('throws on a 200 with no songs field (garbage body)', async () => {
-    const s = serve(() => Response.json({ error: 'boom' }));
-    try {
-      await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow(
-        /empty or invalid/,
+        /empty or invalid songs/,
       );
     } finally {
       s.stop(true);
@@ -90,23 +98,18 @@ describe('fetchDataset — API failure paths', () => {
   });
 
   test('throws when songs is the wrong type', async () => {
-    const s = serve(() => Response.json({ songs: 'nope' }));
+    const s = serveDataset({ data: { ...VALID, songs: { not: 'an array' } } });
     try {
       await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow(
-        /empty or invalid/,
+        /empty or invalid songs/,
       );
     } finally {
       s.stop(true);
     }
   });
 
-  test('throws on a malformed (non-JSON) body', async () => {
-    const s = serve(
-      () =>
-        new Response('<html>not json</html>', {
-          headers: { 'content-type': 'text/html' },
-        }),
-    );
+  test('throws on a malformed (non-JSON) file body', async () => {
+    const s = serveDataset({ body: { songs: '<html>not json</html>' } });
     try {
       await expect(fetchDataset(`http://localhost:${s.port}`)).rejects.toThrow();
     } finally {
@@ -115,17 +118,14 @@ describe('fetchDataset — API failure paths', () => {
   });
 
   test('throws on a network failure (connection refused)', async () => {
-    const s = serve(() => Response.json(VALID));
+    const s = serveDataset();
     const port = s.port;
-    s.stop(true); // close the server so the port refuses connections
+    s.stop(true);
     await expect(fetchDataset(`http://localhost:${port}`)).rejects.toThrow();
   });
 
-  test('throws a timeout error when the API hangs past timeoutMs', async () => {
-    const s = serve(async () => {
-      await Bun.sleep(1000);
-      return Response.json(VALID);
-    });
+  test('throws a timeout error when the CDN hangs past timeoutMs', async () => {
+    const s = serveDataset({ delayMs: 1000 });
     try {
       await expect(
         fetchDataset(`http://localhost:${s.port}`, { timeoutMs: 50 }),
@@ -138,10 +138,7 @@ describe('fetchDataset — API failure paths', () => {
 
 describe('fetchDataset — cancellation', () => {
   test('rejects when the caller aborts mid-flight', async () => {
-    const s = serve(async () => {
-      await Bun.sleep(1000);
-      return Response.json(VALID);
-    });
+    const s = serveDataset({ delayMs: 1000 });
     const controller = new AbortController();
     const p = fetchDataset(`http://localhost:${s.port}`, {
       signal: controller.signal,
@@ -156,12 +153,10 @@ describe('fetchDataset — cancellation', () => {
   });
 
   test('rejects immediately if the signal is already aborted', async () => {
-    const s = serve(() => Response.json(VALID));
+    const s = serveDataset();
     try {
       await expect(
-        fetchDataset(`http://localhost:${s.port}`, {
-          signal: AbortSignal.abort(),
-        }),
+        fetchDataset(`http://localhost:${s.port}`, { signal: AbortSignal.abort() }),
       ).rejects.toThrow();
     } finally {
       s.stop(true);

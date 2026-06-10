@@ -67,13 +67,14 @@ Song discography data originates from the Love Live data scrapers
 consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
 
 The app no longer hardcodes or bundles this data. A **Firestore** database is
-refreshed **daily** by a Cloud Run Job running those same scrapers, and the
-frontend fetches it entirely at runtime from `VITE_DATA_URL` (today the Cloud Run
-data API's `/data`; the planned cutover serves a static `dataset.json` from
-Firebase Hosting's global CDN — same shape, just an env change). There is no
-bundled fallback: if the data URL is unreachable the app shows an error (with
-retry) rather than stale data. Firestore stores each entity as a queryable
-document and is ~$0/month at this scale.
+refreshed **daily** by a Cloud Run Job running those same scrapers. A daily
+GitHub Action ([`ll-music-data`](https://github.com/mting314/ll-music-data))
+pulls that dataset and commits it as **per-entity JSON files** (`songs.json`,
+`artists.json`, …), which **GitHub Pages** serves on its global CDN. The frontend
+fetches those files at runtime from `VITE_DATA_BASE` (à la sekai-viewer). There is
+no bundled fallback: if the data is unreachable the app shows an error (with
+retry) rather than stale data. Firestore is ~$0/month at this scale, and the CDN
+read path is $0 (GitHub Pages).
 
 ```mermaid
 flowchart LR
@@ -81,7 +82,9 @@ flowchart LR
     SCRIPTS["ll-sorter-scripts<br/>+ Fandom wiki"] -.-> JOB
     JOB -->|write docs + snapshot| FS[("Firestore")]
     API["Cloud Run<br/>data API · /data"] -->|read snapshot| FS
-    WEB["Frontend<br/>(GitHub Pages)"] -->|fetch /data at runtime| API
+    GHA["GitHub Action<br/>(daily, ll-music-data)"] -->|fetch + split| API
+    GHA -->|commit per-entity JSON| PAGES["GitHub Pages CDN<br/>songs.json, artists.json, …"]
+    WEB["Frontend<br/>(GitHub Pages)"] -->|fetch per-entity JSON| PAGES
 ```
 
 See [`pipeline/README.md`](pipeline/README.md) for the full architecture and the

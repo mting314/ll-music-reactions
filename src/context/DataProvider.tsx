@@ -10,11 +10,11 @@ import { fetchDataset } from '@/data/fetchDataset';
 
 const DataContext = createContext<Dataset | null>(null);
 
-// The dataset is fetched at runtime from VITE_DATA_URL — either the Cloud Run
-// data API (`…/data`) or a static CDN file (Firebase Hosting `…/dataset.json`).
-// There is no bundled fallback by design: the app shows either current data or
-// an honest error — never stale data.
-const DATA_URL = import.meta.env.VITE_DATA_URL as string | undefined;
+// The dataset is fetched at runtime from VITE_DATA_BASE — the base URL of the
+// data CDN (the ll-music-data repo on GitHub Pages), under which the per-entity
+// JSON files live. There is no bundled fallback by design: the app shows either
+// current data or an honest error — never stale data.
+const DATA_BASE = import.meta.env.VITE_DATA_BASE as string | undefined;
 
 export function useDataset(): Dataset {
   const dataset = useContext(DataContext);
@@ -32,7 +32,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Misconfiguration is handled in render (Retry can't fix a missing URL).
-    if (!DATA_URL) return;
+    if (!DATA_BASE) return;
 
     const controller = new AbortController();
     let cancelled = false;
@@ -41,7 +41,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const ds = await fetchDataset(DATA_URL, { signal: controller.signal });
+        const ds = await fetchDataset(DATA_BASE, { signal: controller.signal });
         if (!cancelled) setDataset(ds);
       } catch (err) {
         if (cancelled) return; // unmounted / superseded by a retry
@@ -56,7 +56,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [attempt]);
 
   // Build-time misconfiguration — retrying won't help, so don't offer it.
-  if (!DATA_URL) {
+  if (!DATA_BASE) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#0f0f1e] text-gray-300">
         <div className="max-w-sm text-center">
@@ -64,7 +64,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
             Data service isn’t configured
           </p>
           <p className="text-sm text-gray-400">
-            VITE_DATA_URL is unset for this build.
+            VITE_DATA_BASE is unset for this build.
           </p>
         </div>
       </div>
