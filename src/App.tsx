@@ -8,6 +8,7 @@ import { SetlistLoader } from '@/components/setlist/SetlistLoader';
 import { EntryList } from '@/components/entry-list/EntryList';
 import { PreviewPlayer } from '@/components/preview/PreviewPlayer';
 import { ExportPanel } from '@/components/export/ExportPanel';
+import { ProjectsPanel } from '@/components/projects/ProjectsPanel';
 import { useTimeline } from '@/hooks/useTimeline';
 import { useVideoExport } from '@/hooks/useVideoExport';
 import {
@@ -35,6 +36,7 @@ export default function App() {
   const videoExport = useVideoExport();
   const [picker, setPicker] = useState<PickerMode>({ type: 'none' });
   const [showExport, setShowExport] = useState(false);
+  const [showProjects, setShowProjects] = useState(false);
   const [view, setView] = useState<AppView>('builder');
 
   const songMap = new Map(songs.map((s) => [s.id, s]));
@@ -64,6 +66,7 @@ export default function App() {
         view={view}
         onChangeView={setView}
         onLoadSetlist={() => setPicker({ type: 'setlist' })}
+        onOpenProjects={() => setShowProjects(true)}
         onPreview={() => setPicker({ type: 'preview' })}
         onExport={() => setShowExport(true)}
         onUndo={timeline.undo}
@@ -185,6 +188,17 @@ export default function App() {
             videoExport.startExport(timeline.entries, songMap, discographyMap, settings)
           }
           onDismiss={() => setShowExport(false)}
+        />
+      )}
+
+      {showProjects && (
+        <ProjectsPanel
+          entries={timeline.entries}
+          onLoad={(entries) => {
+            timeline.loadEntries(entries);
+            setShowProjects(false);
+          }}
+          onClose={() => setShowProjects(false)}
         />
       )}
       </>
