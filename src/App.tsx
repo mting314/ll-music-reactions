@@ -21,6 +21,7 @@ import {
 type PickerMode =
   | { type: 'none' }
   | { type: 'song'; entryId: string }
+  | { type: 'addSong' } // picking a song to create a NEW entry
   | { type: 'clip'; entryId: string }
   | { type: 'setlist' }
   | { type: 'preview' };
@@ -43,8 +44,11 @@ export default function App() {
   const handleSelectSong = (songId: string) => {
     if (picker.type === 'song') {
       timeline.updateEntry(picker.entryId, { songId });
-      setPicker({ type: 'none' });
+    } else if (picker.type === 'addSong') {
+      // New entry starts from the chosen song (clip added afterward).
+      timeline.addEntry(null, songId);
     }
+    setPicker({ type: 'none' });
   };
 
   const handleSelectClip = (clipId: string) => {
@@ -90,7 +94,7 @@ export default function App() {
       {view === 'builder' && (
       <>
       <main className="flex min-h-0 flex-1">
-        {picker.type === 'song' && (
+        {(picker.type === 'song' || picker.type === 'addSong') && (
           <div className="w-96 border-r border-gray-700 overflow-y-auto">
             <SongPicker
               songs={songs}
@@ -125,10 +129,7 @@ export default function App() {
               </p>
               <div className="flex gap-4">
                 <button
-                  onClick={() => {
-                    timeline.addEntry();
-                    setPicker({ type: 'none' });
-                  }}
+                  onClick={() => setPicker({ type: 'addSong' })}
                   className="rounded-lg bg-pink-600 px-6 py-3 font-medium text-white hover:bg-pink-500"
                 >
                   + Add Entry
@@ -157,7 +158,7 @@ export default function App() {
                 }
               />
               <button
-                onClick={() => timeline.addEntry()}
+                onClick={() => setPicker({ type: 'addSong' })}
                 className="mt-3 w-full rounded-lg border-2 border-dashed border-gray-700 py-3 text-sm text-gray-500 hover:border-gray-500 hover:text-gray-300"
               >
                 + Add entry
