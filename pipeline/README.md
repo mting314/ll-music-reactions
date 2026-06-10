@@ -1,13 +1,11 @@
 # Data pipeline (GCP)
 
-Replaces the hardcoded `src/data/*.json` imports with a **Firestore** database
-that is **refreshed daily** using the same scraper scripts as
-[`hamzaabamboo/ll-sorter-scripts`](https://github.com/hamzaabamboo/ll-sorter-scripts).
-
-Firestore stores each entity as a **native document** (queryable per-record),
-and is ~$0/month at this scale (free tier). A Cloud Run **data API** reads it
-server-side and serves the dataset to the frontend (so the browser never needs
-the Firebase SDK).
+A daily **Cloud Run job** scrapes the Love Live catalog (using the same scraper
+scripts as [`hamzaabamboo/ll-sorter-scripts`](https://github.com/hamzaabamboo/ll-sorter-scripts)),
+builds the dataset, and **publishes it as per-entity JSON to the
+[`ll-music-data`](https://github.com/mting314/ll-music-data) repo**, which GitHub
+Pages serves to the frontend. **No database, no API** — the job is the single
+producer; the data repo (served by Pages) is the single source the app reads.
 
 ## Architecture
 
@@ -23,11 +21,11 @@ flowchart LR
     SCRIPTS["ll-sorter-scripts<br/>(private, pinned SHA)"]
 
     subgraph job["Cloud Run Job · ll-data-refresh"]
-        REFRESH["clone scrapers + seed baseline<br/>run update.ts + parse-discography<br/>build dataset"]
+        REFRESH["clone scrapers + seed baseline<br/>run update.ts + parse-discography<br/>build dataset → split → git push"]
     end
 
-    FS[("Firestore<br/>per-entity docs + snapshot")]
-    API["Cloud Run · ll-data-api<br/>GET /data (cached)"]
+    REPO["ll-music-data repo<br/>per-entity JSON"]
+    PAGES["GitHub Pages CDN"]
     WEB["Frontend · GitHub Pages<br/>DataProvider"]
 
     SCH -->|triggers| REFRESH
@@ -35,22 +33,20 @@ flowchart LR
     SCRIPTS -.cloned by.-> REFRESH
     LF --> REFRESH
     WIKI --> REFRESH
-    REFRESH -->|write docs + snapshot| FS
-    API -->|read snapshot ~4 reads| FS
-    WEB -->|fetch /data at runtime| API
+    REFRESH -->|commit + push JSON| REPO
+    REPO --> PAGES
+    WEB -->|fetch per-entity JSON| PAGES
 ```
 
-The Cloud Run `GET /data` is the source the daily mirror reads. The frontend
-itself fetches **per-entity JSON files** from `VITE_DATA_BASE` at runtime — the
-[`ll-music-data`](https://github.com/mting314/ll-music-data) repo, served via
-GitHub Pages' global CDN (a daily GitHub Action pulls `GET /data` and commits
-`songs.json`, `artists.json`, …). There is no bundled fallback: data is never
-embedded in the app, and an unreachable (or unconfigured) base surfaces an error
-rather than stale data.
+The frontend fetches **per-entity JSON files** from `VITE_DATA_BASE` at runtime
+(`https://<user>.github.io/ll-music-data/<file>.json`). There is no bundled
+fallback: data is never embedded in the app, and an unreachable (or
+unconfigured) base surfaces an error rather than stale data.
 
 ## Data model
 
-Firestore collections (each entity is one native document, keyed by its `id`):
+The job emits one JSON file per entity (`songs.json`, `artists.json`, …) plus
+`seriesNames.json` and `build.json`. Relationships:
 
 ```mermaid
 erDiagram
@@ -112,76 +108,43 @@ erDiagram
     }
 ```
 
-Plus two non-entity collections:
+Published files: `songs.json`, `artists.json`, `discographies.json`,
+`seriesInfo.json`, `seriesNames.json` (JP→EN name map), `performances.json`,
+`setlists.json` (keyed by `performanceId`), and `build.json`
+(`{ generatedAt, counts }`). The frontend assembles these into one `Dataset`.
 
-- **`meta`** — `meta/seriesNames` (JP→EN name map) and `meta/build`
-  (`{ generatedAt, counts }` for the last refresh).
-- **`snapshot`** — the whole dataset JSON split into `<1 MiB` chunks
-  (`snapshot/0…N` + `snapshot/meta`), so `GET /data` is ~4 reads instead of
-  ~3,100. The per-entity collections above stay queryable; the snapshot is just
-  the cheap serving path.
-
-The `/data` response the frontend consumes is:
-
-```jsonc
-{
-  "songs": [...], "artists": [...], "discographies": [...],
-  "seriesInfo": [...], "seriesNames": { "<jp>": "<en>" },
-  "performances": [...], "setlists": { "<performanceId>": { ...Setlist } },
-  "build": { "generatedAt": "<iso>", "counts": { "songs": 886, ... } }
-}
-```
-
-> `characters` (id, name, school, units, seriesIds) is also scraped and stored,
-> but not yet consumed by the app.
+> `characters` (id, name, school, units, seriesIds) is also scraped, but not yet
+> consumed by the app.
 
 ## Pieces
 
 | Path | What |
 |------|------|
-| `firestore.ts` | Firestore REST client + JSON↔native-value converter (no SDK) |
-| `build-dataset.ts` | Assemble canonical JSON → one dataset object |
-| `load-firestore.ts` | Write the dataset into Firestore collections (batched) |
-| `run-refresh.ts` | Daily job: clone+run scrapers, build dataset, write Firestore |
+| `build-dataset.ts` | Assemble the scraped data into one canonical dataset object |
+| `publish-data.ts` | Split the dataset into per-entity files + `git push` to the data repo |
+| `run-refresh.ts` | Daily job: clone+run scrapers → build → publish |
 | `Dockerfile` | Cloud Run Job image (Bun + git) |
-| `../data-api/server.ts` | Cloud Run service: reads Firestore, serves `GET /data` |
-| `setup-gcp.sh` | One-time provisioning (Firestore, service, job, scheduler) |
+| `setup-gcp.sh` | One-time provisioning (secret, job, scheduler) |
 
-## Why per-record documents
+## ⚠️ Tokens
 
-Each song/artist/etc. is a real Firestore document (native typed fields, not a
-JSON blob), so you can later run server-side queries
-(e.g. `where('seriesIds','array-contains', x)`) and add filtered API endpoints
-without re-modeling the data. `firestore.test.ts` verifies the encode/decode
-round-trips on real entity shapes.
-
-## ⚠️ The scraper repo is private
-
-`ll-sorter-scripts` is **private**, so the Cloud Run Job needs a **GitHub token**
-(read access) to clone it. `setup-gcp.sh` stores it in Secret Manager; the job
-reads it as `GITHUB_TOKEN` (redacted from all logs). The public
-`hamproductions/the-sorter` seed repo needs no token.
+`ll-sorter-scripts` is **private**, so the Cloud Run Job needs a **GitHub PAT**
+to clone it — and the *same* token also needs **write** access to the
+`ll-music-data` repo to push the published JSON. `setup-gcp.sh` stores it in
+Secret Manager; the job reads it as `GITHUB_TOKEN` (redacted from all logs). The
+public `hamproductions/the-sorter` seed repo needs no token.
 
 ## Setup (run once, after review)
 
 ```bash
-export GITHUB_TOKEN='<PAT with read access to ll-sorter-scripts>'
-./pipeline/setup-gcp.sh     # Firestore + secret + service + job + scheduler, runs job once
-# then point the frontend at the data URL and redeploy Pages:
-#   .env.production -> VITE_DATA_BASE=https://<user>.github.io/ll-music-data
-```
-
-## Local development
-
-```bash
-cd pipeline && bun install
-bun run build:local         # assemble src/data -> ./dataset.json (no network)
-bun test ../pipeline        # converter round-trip tests
+export GITHUB_TOKEN='<PAT: read on ll-sorter-scripts, write on ll-music-data>'
+./pipeline/setup-gcp.sh     # secret + job + scheduler, runs the job once
+# frontend already reads it via .env.production:
+#   VITE_DATA_BASE=https://<user>.github.io/ll-music-data
 ```
 
 ## ⚠️ Validation note
 
-The converter, dataset assembly, data API shape, and frontend wiring are
-verified by CI / local tests. The **scrape step** hits external sites and
-depends on the upstream repos' layout, so it's validated in the live Cloud Run
-Job (the full scrape + wiki pull has been run successfully end-to-end).
+Dataset assembly + the publish split are covered by tests. The **scrape step**
+hits external sites and depends on the upstream repos' layout, so it's validated
+only in the live Cloud Run Job.

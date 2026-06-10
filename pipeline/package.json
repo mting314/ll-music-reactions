@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:local": "bun run build-dataset.ts ../src/data --out ./dataset.json",
     "refresh": "bun run run-refresh.ts"
   },
   "dependencies": {
