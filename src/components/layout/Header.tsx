@@ -6,6 +6,7 @@ interface HeaderProps {
   view: AppView;
   onChangeView: (view: AppView) => void;
   onLoadSetlist: () => void;
+  onOpenProjects: () => void;
   onPreview: () => void;
   onExport: () => void;
   onUndo: () => void;
@@ -19,6 +20,7 @@ export function Header({
   view,
   onChangeView,
   onLoadSetlist,
+  onOpenProjects,
   onPreview,
   onExport,
   onUndo,
@@ -86,6 +88,12 @@ export function Header({
                 ↪
               </button>
             </div>
+            <button
+              onClick={onOpenProjects}
+              className="rounded px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+            >
+              Save / Load
+            </button>
             <button
               onClick={onLoadSetlist}
               className="rounded px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
