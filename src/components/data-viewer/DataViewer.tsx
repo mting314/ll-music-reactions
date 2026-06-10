@@ -227,7 +227,7 @@ export function DataViewer() {
           <EntityList
             items={songs.filter((s) =>
               !q ||
-              s.name.toLowerCase().includes(q) ||
+              s.name?.toLowerCase().includes(q) ||
               s.englishName?.toLowerCase().includes(q) ||
               s.phoneticName?.toLowerCase().includes(q),
             )}
@@ -256,7 +256,7 @@ export function DataViewer() {
 
         {tab === 'artists' && (
           <EntityList
-            items={artists.filter((a) => !q || a.name.toLowerCase().includes(q))}
+            items={artists.filter((a) => !q || a.name?.toLowerCase().includes(q))}
             total={artists.length}
             renderRow={(a) => (
               <div key={a.id} className="flex items-center gap-3 border-b border-gray-800 py-2">
@@ -271,7 +271,7 @@ export function DataViewer() {
 
         {tab === 'discographies' && (
           <EntityList
-            items={discographies.filter((d) => !q || d.name.toLowerCase().includes(q))}
+            items={discographies.filter((d) => !q || d.name?.toLowerCase().includes(q))}
             total={discographies.length}
             renderRow={(d) => (
               <div key={d.id} className="flex items-center gap-3 border-b border-gray-800 py-2">
@@ -293,7 +293,7 @@ export function DataViewer() {
             items={series.filter(
               (s) =>
                 !q ||
-                s.name.toLowerCase().includes(q) ||
+                s.name?.toLowerCase().includes(q) ||
                 s.englishName?.toLowerCase().includes(q),
             )}
             total={series.length}
@@ -301,7 +301,7 @@ export function DataViewer() {
               <div key={s.id} className="flex items-center gap-3 border-b border-gray-800 py-2">
                 <span
                   className="h-4 w-4 shrink-0 rounded"
-                  style={{ backgroundColor: s.color }}
+                  style={{ backgroundColor: s.color || '#666' }}
                 />
                 <div className="min-w-0 flex-1 truncate text-sm text-white">
                   {s.englishName || s.name}
@@ -361,7 +361,7 @@ export function DataViewer() {
             items={clips.filter(
               (c) =>
                 !q ||
-                c.name.toLowerCase().includes(q) ||
+                c.name?.toLowerCase().includes(q) ||
                 c.tags?.some((t) => t.toLowerCase().includes(q)),
             )}
             total={clips.length}
