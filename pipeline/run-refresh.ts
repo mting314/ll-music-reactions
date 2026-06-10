@@ -26,8 +26,9 @@ const SEED_REPO =
   process.env.SEED_REPO ?? "https://github.com/hamproductions/the-sorter";
 const SEED_REF = process.env.SEED_REF ?? "main";
 
-// The scraper repo is private, so the job needs a GitHub token (read access)
-// to clone it. Provide via Secret Manager (see setup-gcp.sh). Never logged.
+// The job needs a GitHub token with READ on the private scraper repo (to clone
+// it) and WRITE on the data repo (publish-data.ts pushes the JSON there).
+// Provide via Secret Manager (see setup-gcp.sh). Never logged.
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
 // Inject token auth into an https github URL for cloning a private repo.
