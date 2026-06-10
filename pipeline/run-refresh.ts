@@ -5,7 +5,8 @@
 //   2. Lay them out as they expect, seeded with a baseline `data/` (incl.
 //      `data/raw`) so the incremental scripts have a starting point.
 //   3. Run upstream `update.ts` (DATA_ONLY) + `parse-discography`.
-//   4. Assemble the canonical JSON and write it into Firestore.
+//   4. Assemble the canonical JSON and publish per-entity files to the data repo
+//      (ll-music-data), which GitHub Pages serves to the frontend.
 //
 // NOTE: the scrape step hits external sites (lovelive-anime.jp, ll-fans.jp, the
 // fandom wiki) and depends on the upstream repos' layout, so it can only be
@@ -14,8 +15,7 @@ import { $ } from "bun";
 import { cp, mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { buildDataset, datasetCounts } from "./build-dataset";
-import { loadDataset } from "./load-firestore";
-import { getProjectId } from "./firestore";
+import { publishData } from "./publish-data";
 
 const SCRAPER_REPO =
   process.env.SCRAPER_REPO ?? "https://github.com/hamzaabamboo/ll-sorter-scripts";
@@ -87,11 +87,11 @@ async function main() {
 
     console.log("Building dataset...");
     const dataset = await buildDataset(dataDir, generatedAt);
-    console.log("Counts:", datasetCounts(dataset));
+    const counts = datasetCounts(dataset);
+    console.log("Counts:", counts);
 
-    const project = await getProjectId();
-    console.log(`Writing to Firestore (project ${project})...`);
-    const counts = await loadDataset(project, dataset);
+    console.log("Publishing per-entity JSON to the data repo...");
+    await publishData(dataset, counts);
 
     console.log("Refresh complete:", counts);
   } catch (err) {

@@ -16,5 +16,5 @@ RUN bun install
 # Pipeline source.
 COPY . .
 
-# DATABASE_URL is provided at deploy time (Cloud SQL connection).
+# GITHUB_TOKEN (secret) and DATA_REPO are provided at deploy time (see setup-gcp.sh).
 CMD ["bun", "run", "run-refresh.ts"]

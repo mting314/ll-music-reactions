@@ -1,5 +1,5 @@
 // Assembles the canonical JSON data files into one dataset object (the shape
-// the frontend consumes). The daily job loads this into Firestore; this module
+// the frontend consumes). The daily job publishes this as per-entity JSON; this module
 // is also runnable standalone to produce a local dataset.json for inspection.
 //
 // Usage: bun run build-dataset.ts <dataDir> --out ./dataset.json

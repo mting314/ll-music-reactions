@@ -41,12 +41,16 @@ deliberate consistency-over-availability choice).
 
 ```
 scrapers (ll-fans.jp / lovelive-anime.jp, via private ll-sorter-scripts)
-  → Cloud Run JOB (pipeline/, daily 03:00 UTC)  → Firestore  (source of truth)
-  → Cloud Run data API (data-api/, GET /data, gzipped, cached)
-  → daily GitHub Action in the ll-music-data repo → per-entity JSON
-  → GitHub Pages CDN  (songs.json, artists.json, …, build.json)
+  → Cloud Run JOB (pipeline/, daily 03:00 UTC): scrape → build → publish
+  → per-entity JSON pushed to the ll-music-data repo → GitHub Pages CDN
+     (songs.json, artists.json, …, build.json)
   → frontend fetchDataset(VITE_DATA_BASE)  → DataProvider (context)  → hooks
 ```
+
+There is **no database and no data API** — the daily Cloud Run job is the single
+producer; it commits per-entity JSON straight to the `ll-music-data` repo (via a
+GitHub token), and GitHub Pages serves it. (This replaced an earlier
+Firestore + Cloud Run data-API + mirror-Action chain.)
 
 - `VITE_DATA_BASE` (in `.env.production` / `.env.development`) = the CDN base
   (`https://mting314.github.io/ll-music-data`). The app fetches the per-entity
@@ -80,13 +84,12 @@ scrapers (ll-fans.jp / lovelive-anime.jp, via private ll-sorter-scripts)
 
 ```
 src/            frontend (components/, hooks/, context/, data/, utils/, types/)
-data-api/       Cloud Run read API (Bun, hand-rolled Firestore REST) — GET /data
-pipeline/       Cloud Run daily-refresh job (scrape → Firestore)
+pipeline/       Cloud Run daily-refresh job: scrape → build → publish JSON
 server/         ffmpeg video-export service (Bun)
 docs/           architecture notes (e.g. saving-builds.md)
 ```
-(The separate **ll-music-data** repo holds the published per-entity JSON + its
-daily refresh workflow — that's the CDN the frontend reads.)
+(The separate **ll-music-data** repo holds the published per-entity JSON, served
+by GitHub Pages — the CDN the frontend reads. The pipeline job pushes to it.)
 
 ## Conventions
 

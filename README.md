@@ -66,24 +66,21 @@ Song discography data originates from the Love Live data scrapers
 ([hamzaabamboo/ll-sorter-scripts](https://github.com/hamzaabamboo/ll-sorter-scripts),
 consumed by [hamproductions/the-sorter](https://github.com/hamproductions/the-sorter)).
 
-The app no longer hardcodes or bundles this data. A **Firestore** database is
-refreshed **daily** by a Cloud Run Job running those same scrapers. A daily
-GitHub Action ([`ll-music-data`](https://github.com/mting314/ll-music-data))
-pulls that dataset and commits it as **per-entity JSON files** (`songs.json`,
-`artists.json`, …), which **GitHub Pages** serves on its global CDN. The frontend
-fetches those files at runtime from `VITE_DATA_BASE` (à la sekai-viewer). There is
-no bundled fallback: if the data is unreachable the app shows an error (with
-retry) rather than stale data. Firestore is ~$0/month at this scale, and the CDN
-read path is $0 (GitHub Pages).
+The app no longer hardcodes or bundles this data. A daily **Cloud Run job**
+(`pipeline/`) scrapes the catalog, builds the dataset, and commits it as
+**per-entity JSON files** (`songs.json`, `artists.json`, …) to the
+[`ll-music-data`](https://github.com/mting314/ll-music-data) repo, which **GitHub
+Pages** serves on its global CDN. The frontend fetches those files at runtime from
+`VITE_DATA_BASE` (à la sekai-viewer). There is **no database and no API**, and no
+bundled fallback — if the data is unreachable the app shows an error (with retry)
+rather than stale data. Cost ~$0 (the job scales to zero; GitHub Pages is free).
 
 ```mermaid
 flowchart LR
-    SCH["Cloud Scheduler<br/>(daily)"] -->|triggers| JOB["Cloud Run Job<br/>scrape + load"]
+    SCH["Cloud Scheduler<br/>(daily)"] -->|triggers| JOB["Cloud Run Job<br/>scrape + build + publish"]
     SCRIPTS["ll-sorter-scripts<br/>+ Fandom wiki"] -.-> JOB
-    JOB -->|write docs + snapshot| FS[("Firestore")]
-    API["Cloud Run<br/>data API · /data"] -->|read snapshot| FS
-    GHA["GitHub Action<br/>(daily, ll-music-data)"] -->|fetch + split| API
-    GHA -->|commit per-entity JSON| PAGES["GitHub Pages CDN<br/>songs.json, artists.json, …"]
+    JOB -->|commit per-entity JSON| REPO["ll-music-data repo"]
+    REPO --> PAGES["GitHub Pages CDN<br/>songs.json, artists.json, …"]
     WEB["Frontend<br/>(GitHub Pages)"] -->|fetch per-entity JSON| PAGES
 ```
 
