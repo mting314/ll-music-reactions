@@ -138,6 +138,7 @@ export default function App() {
               onPickSong={(entryId) => setPicker({ type: 'song', entryId })}
               onPickClip={(entryId) => setPicker({ type: 'clip', entryId })}
               onRemove={timeline.removeEntry}
+              onReorder={timeline.reorderEntries}
               onUpdateStartTime={(entryId, time) =>
                 timeline.updateEntry(entryId, { songStartTime: time })
               }
