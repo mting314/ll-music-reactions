@@ -59,4 +59,9 @@ describe('sanitizeEntries', () => {
     expect(sanitizeEntries(42)).toEqual([]);
     expect(sanitizeEntries({})).toEqual([]);
   });
+
+  test('rejects non-object array items (e.g. [1,2,3]) instead of making blank rows', () => {
+    expect(sanitizeEntries([1, 2, 3])).toEqual([]);
+    expect(sanitizeEntries(['a', 'b'])).toEqual([]);
+  });
 });

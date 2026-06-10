@@ -28,7 +28,12 @@ export function ProjectsPanel({ entries, onLoad, onClose }: ProjectsPanelProps) 
 
   const handleSave = () => {
     if (!name.trim()) return;
-    saveProject(name, entries);
+    const ok = saveProject(name, entries);
+    if (!ok) {
+      setError('Could not save — browser storage is full or disabled.');
+      return;
+    }
+    setError(null);
     setName('');
   };
 

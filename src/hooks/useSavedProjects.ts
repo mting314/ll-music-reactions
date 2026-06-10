@@ -38,15 +38,19 @@ export function sanitizeEntries(raw: unknown): TimelineEntry[] {
       ? (raw as { entries: unknown[] }).entries
       : null;
   if (!arr) return [];
-  return arr.map((e) => {
-    const o = (e ?? {}) as Partial<TimelineEntry>;
-    return {
-      id: typeof o.id === 'string' && o.id ? o.id : uuidv4(),
-      clipId: typeof o.clipId === 'string' ? o.clipId : null,
-      songId: typeof o.songId === 'string' ? o.songId : null,
-      songStartTime: typeof o.songStartTime === 'number' ? o.songStartTime : null,
-    };
-  });
+  return arr
+    // Reject non-object items so a non-entry array (e.g. [1,2,3]) doesn't turn
+    // into a pile of blank rows.
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => {
+      const o = e as Partial<TimelineEntry>;
+      return {
+        id: typeof o.id === 'string' && o.id ? o.id : uuidv4(),
+        clipId: typeof o.clipId === 'string' ? o.clipId : null,
+        songId: typeof o.songId === 'string' ? o.songId : null,
+        songStartTime: typeof o.songStartTime === 'number' ? o.songStartTime : null,
+      };
+    });
 }
 
 // ---- storage ---------------------------------------------------------------
@@ -61,21 +65,25 @@ function load(): SavedProject[] {
   return [];
 }
 
-function persist(projects: SavedProject[]) {
+// Returns false if the write failed (quota exceeded / storage disabled).
+function persist(projects: SavedProject[]): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+    return true;
   } catch {
-    // ignore (e.g. quota exceeded / storage disabled)
+    return false;
   }
 }
 
 export function useSavedProjects() {
   const [projects, setProjects] = useState<SavedProject[]>(load);
 
-  const saveProject = useCallback((name: string, entries: TimelineEntry[]) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setProjects((prev) => {
+  // Returns false if persisting failed, so the UI can warn instead of silently
+  // "saving" a build that's gone on reload.
+  const saveProject = useCallback(
+    (name: string, entries: TimelineEntry[]): boolean => {
+      const trimmed = name.trim();
+      if (!trimmed) return false;
       const project: SavedProject = {
         id: uuidv4(),
         name: trimmed,
@@ -83,11 +91,13 @@ export function useSavedProjects() {
         // Deep-copy so later edits to the working timeline can't mutate the snapshot.
         entries: JSON.parse(JSON.stringify(entries)) as TimelineEntry[],
       };
-      const next = upsertProject(prev, project);
-      persist(next);
-      return next;
-    });
-  }, []);
+      const next = upsertProject(projects, project);
+      const ok = persist(next);
+      setProjects(next);
+      return ok;
+    },
+    [projects],
+  );
 
   const deleteProject = useCallback((id: string) => {
     setProjects((prev) => {
