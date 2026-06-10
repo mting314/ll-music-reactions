@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
-import type { Song, SongFilter } from '@/types';
+import type { Song, SongFilter, Artist } from '@/types';
 import { fuzzySearch, getSearchScore } from '@/utils/search';
 import { matchSongFilter, EMPTY_FILTER } from '@/utils/filters';
 
 const MAX_RESULTS = 50;
 
-export function useSongSearch(songs: Song[]) {
+export function useSongSearch(songs: Song[], artistMap: Map<string, Artist>) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<SongFilter>(EMPTY_FILTER);
 
@@ -15,10 +15,11 @@ export function useSongSearch(songs: Song[]) {
     const hasFilter =
       filter.series.length > 0 ||
       filter.artists.length > 0 ||
-      filter.years.length > 0;
+      filter.years.length > 0 ||
+      filter.types.length > 0;
 
     if (hasFilter) {
-      filtered = filtered.filter((s) => matchSongFilter(s, filter));
+      filtered = filtered.filter((s) => matchSongFilter(s, filter, artistMap));
     }
 
     if (!query.trim()) {
@@ -31,7 +32,7 @@ export function useSongSearch(songs: Song[]) {
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_RESULTS)
       .map((r) => r.song);
-  }, [songs, query, filter]);
+  }, [songs, artistMap, query, filter]);
 
   return { query, setQuery, filter, setFilter, results };
 }

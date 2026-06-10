@@ -102,8 +102,11 @@ export interface ExportSettings {
   overlaySize: number;
 }
 
+export type SongType = 'solo' | 'unit' | 'group';
+
 export interface SongFilter {
   series: number[];
   artists: string[];
   years: number[];
+  types: SongType[];
 }
