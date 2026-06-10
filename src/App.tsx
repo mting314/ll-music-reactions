@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Header, type AppView } from '@/components/layout/Header';
 import { DataViewer } from '@/components/data-viewer/DataViewer';
-import { Timeline } from '@/components/timeline/Timeline';
 import { SongPicker } from '@/components/song-picker/SongPicker';
 import { ClipPicker } from '@/components/clip-picker/ClipPicker';
 import { SetlistLoader } from '@/components/setlist/SetlistLoader';
@@ -143,33 +142,30 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <EntryList
-              entries={timeline.entries}
-              songMap={songMap}
-              discographyMap={discographyMap}
-              clips={clips}
-              onPickSong={(entryId) => setPicker({ type: 'song', entryId })}
-              onPickClip={(entryId) => setPicker({ type: 'clip', entryId })}
-              onRemove={timeline.removeEntry}
-              onReorder={timeline.reorderEntries}
-              onUpdateStartTime={(entryId, time) =>
-                timeline.updateEntry(entryId, { songStartTime: time })
-              }
-            />
+            <div className="w-full max-w-2xl">
+              <EntryList
+                entries={timeline.entries}
+                songMap={songMap}
+                discographyMap={discographyMap}
+                clips={clips}
+                onPickSong={(entryId) => setPicker({ type: 'song', entryId })}
+                onPickClip={(entryId) => setPicker({ type: 'clip', entryId })}
+                onRemove={timeline.removeEntry}
+                onReorder={timeline.reorderEntries}
+                onUpdateStartTime={(entryId, time) =>
+                  timeline.updateEntry(entryId, { songStartTime: time })
+                }
+              />
+              <button
+                onClick={() => timeline.addEntry()}
+                className="mt-3 w-full rounded-lg border-2 border-dashed border-gray-700 py-3 text-sm text-gray-500 hover:border-gray-500 hover:text-gray-300"
+              >
+                + Add entry
+              </button>
+            </div>
           )}
         </div>
       </main>
-
-      <Timeline
-        entries={timeline.entries}
-        songMap={songMap}
-        discographyMap={discographyMap}
-        onAdd={() => timeline.addEntry()}
-        onRemove={timeline.removeEntry}
-        onReorder={timeline.reorderEntries}
-        onPickSong={(entryId) => setPicker({ type: 'song', entryId })}
-        onPickClip={(entryId) => setPicker({ type: 'clip', entryId })}
-      />
 
       {picker.type === 'setlist' && (
         <SetlistLoader
