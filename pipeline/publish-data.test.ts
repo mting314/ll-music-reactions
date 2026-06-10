@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { toPublishFiles } from "./publish-data";
+import { toPublishFiles, publishData } from "./publish-data";
 import type { Dataset } from "./build-dataset";
 
 const dataset: Dataset = {
@@ -39,5 +39,12 @@ describe("toPublishFiles", () => {
     expect(files["songs.json"]).toEqual([{ id: "1" }]);
     expect(files["seriesNames.json"]).toEqual({ S: "Series" });
     expect(files["setlists.json"]).toEqual({ p: { foo: 1 } });
+  });
+});
+
+describe("publishData guard", () => {
+  test("refuses to publish a dataset with no songs (before any git/token)", async () => {
+    const empty = { ...dataset, songs: [] };
+    await expect(publishData(empty, {})).rejects.toThrow(/no songs/);
   });
 });

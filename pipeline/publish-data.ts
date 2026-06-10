@@ -32,6 +32,15 @@ export async function publishData(
   dataset: Dataset,
   counts: Record<string, number>,
 ): Promise<void> {
+  // Never publish an empty/partial scrape — it would overwrite the good JSON and
+  // (via the frontend's non-empty-songs guard) take the live site down until the
+  // next good run. Fail instead; the data repo keeps its last-good files.
+  if (!dataset.songs?.length) {
+    throw new Error(
+      "refusing to publish: dataset has no songs (likely a partial/failed scrape)",
+    );
+  }
+
   const token = process.env.GITHUB_TOKEN;
   if (!token) throw new Error("GITHUB_TOKEN is required to publish to the data repo");
 
