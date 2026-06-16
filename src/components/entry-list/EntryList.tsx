@@ -240,6 +240,7 @@ function AudioScrubber({
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const toRel = (abs: number) => Math.max(0, abs - leadIn);
 
   // Audible length, relative to the music onset. Sourced from the decoded
@@ -261,6 +262,9 @@ function AudioScrubber({
   const [playRel, setPlayRel] = useState(startRel);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  // Timeline zoom: the inner track is `zoom`× the container width, scrolled
+  // horizontally — more pixels per second means finer marker/playhead placement.
+  const [zoom, setZoom] = useState(1);
   const dragging = useRef<null | 'marker' | 'playhead'>(null);
 
   // During playback the playhead only advances on `timeupdate` (~4Hz), which
@@ -276,6 +280,29 @@ function AudioScrubber({
     if (dragging.current) return;
     setPlayRel((p) => clamp(p, startRel, duration || startRel));
   }, [startRel, duration]);
+
+  // Horizontal-scroll the zoomed timeline so the playhead stays in view:
+  // `center` recenters it (used when zoom changes); otherwise only scroll once
+  // it nears an edge (used as playback advances).
+  const scrollPlayheadIntoView = (center: boolean) => {
+    const c = scrollRef.current;
+    if (!c || !duration) return;
+    const px = (playRel / duration) * c.scrollWidth;
+    const margin = c.clientWidth * 0.15;
+    if (center || px < c.scrollLeft + margin || px > c.scrollLeft + c.clientWidth - margin) {
+      c.scrollLeft = clamp(px - c.clientWidth / 2, 0, c.scrollWidth - c.clientWidth);
+    }
+  };
+  // Recenter on the playhead when the zoom level changes.
+  useEffect(() => {
+    scrollPlayheadIntoView(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
+  // Follow the playhead as it advances during playback.
+  useEffect(() => {
+    if (isPlaying && !isScrubbing) scrollPlayheadIntoView(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRel, isPlaying, isScrubbing]);
 
   // Commit an absolute file offset, rounded to the millisecond (stable against
   // float noise while preserving the precision needed for an exact start).
@@ -457,6 +484,8 @@ function AudioScrubber({
         {isPlaying ? '❚❚' : '►'}
       </button>
 
+      {/* Scrollable viewport; the inner track is `zoom`× as wide for precision. */}
+      <div ref={scrollRef} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
       {/* Two-handle track: a draggable start marker + a playhead. */}
       <div
         ref={trackRef}
@@ -464,9 +493,8 @@ function AudioScrubber({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
-        className={`relative h-6 min-w-0 flex-1 touch-none ${
-          duration ? 'cursor-pointer' : 'opacity-40'
-        }`}
+        className={`relative h-6 touch-none ${duration ? 'cursor-pointer' : 'opacity-40'}`}
+        style={{ width: `${zoom * 100}%` }}
       >
         {/* base rail */}
         <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
@@ -521,10 +549,34 @@ function AudioScrubber({
           <div className="absolute -top-px h-1.5 w-1.5 rotate-45 bg-pink-500" />
         </div>
       </div>
+      </div>
 
       <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
         {formatTime(playRel)}
       </span>
+
+      {/* Zoom controls — more pixels per second for precise placement. */}
+      <div className="flex shrink-0 items-center gap-0.5 text-gray-400">
+        <button
+          onClick={() => setZoom((z) => Math.max(1, z / 2))}
+          disabled={!duration || zoom <= 1}
+          className="rounded px-1 text-sm leading-none hover:bg-gray-700 hover:text-white disabled:opacity-30"
+          title="Zoom out"
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <span className="w-6 text-center text-[10px] tabular-nums">{zoom}×</span>
+        <button
+          onClick={() => setZoom((z) => Math.min(8, z * 2))}
+          disabled={!duration || zoom >= 8}
+          className="rounded px-1 text-sm leading-none hover:bg-gray-700 hover:text-white disabled:opacity-30"
+          title="Zoom in"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 }
