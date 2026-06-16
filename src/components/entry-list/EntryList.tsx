@@ -92,55 +92,109 @@ function getAudioCtx(): AudioContext | null {
   return sharedAudioCtx;
 }
 
+const PENDING_ANALYSIS: AudioAnalysis = { leadIn: 0, duration: 0, failed: false };
+
+// Decoded results are cached by URL (module scope) so a song is only ever
+// fetched + decoded once — across rows, reorders, remounts, and duplicate songs.
+const analysisCache = new Map<string, AudioAnalysis>();
+const analysisInflight = new Map<string, Promise<AudioAnalysis>>();
+
 /**
- * Decode a song's audio (Web Audio API) to get its leading silence AND its
- * exact duration. We prefer the decoded buffer over the <audio> element's
- * metadata because the catalog audio is Ogg, whose element-reported `duration`
- * is often `Infinity` in Chrome until fully buffered — which would break the
- * scrubber's range. Returns zeros until decoded; `failed` flips true only if
- * the fetch/decode errors (the scrubber then falls back to the <audio>
- * element's own duration, so the slider can still work).
+ * Fetch + decode a song's audio (Web Audio API) once, returning its leading
+ * silence AND exact duration. We use the decoded buffer rather than the <audio>
+ * element's metadata because the catalog audio is Ogg, whose element-reported
+ * `duration` is often `Infinity` in Chrome until fully buffered. Result (incl.
+ * `failed`) is cached and in-flight requests are de-duped.
  */
-function useAudioAnalysis(src: string | null | undefined): AudioAnalysis {
-  const [analysis, setAnalysis] = useState<AudioAnalysis>({
-    leadIn: 0,
-    duration: 0,
-    failed: false,
-  });
+function analyzeAudio(src: string): Promise<AudioAnalysis> {
+  const cached = analysisCache.get(src);
+  if (cached) return Promise.resolve(cached);
+  const existing = analysisInflight.get(src);
+  if (existing) return existing;
+
+  const p = (async (): Promise<AudioAnalysis> => {
+    try {
+      // no-referrer is required: fandom hotlink-protection 404s any request
+      // carrying an external Referer (same as the album-art <img>s).
+      const res = await fetch(src, { mode: 'cors', referrerPolicy: 'no-referrer' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const bytes = await res.arrayBuffer();
+      const ctx = getAudioCtx();
+      if (!ctx) throw new Error('no AudioContext');
+      const buf = await ctx.decodeAudioData(bytes);
+      return {
+        leadIn: detectLeadIn(buf.getChannelData(0), buf.sampleRate),
+        duration: buf.duration,
+        failed: false,
+      };
+    } catch {
+      return { leadIn: 0, duration: 0, failed: true };
+    }
+  })()
+    .then((a) => {
+      analysisCache.set(src, a);
+      return a;
+    })
+    .finally(() => analysisInflight.delete(src));
+
+  analysisInflight.set(src, p);
+  return p;
+}
+
+/**
+ * Lazily analyze a song's audio: the fetch + decode (a full ~MBs download per
+ * song) only runs once `active` is true — wired to viewport visibility so a long
+ * timeline doesn't decode every off-screen row up front. Cached results return
+ * synchronously.
+ */
+function useAudioAnalysis(src: string | null | undefined, active: boolean): AudioAnalysis {
+  const [, forceUpdate] = useState(0);
+  const cached = src ? analysisCache.get(src) : undefined;
 
   useEffect(() => {
-    setAnalysis({ leadIn: 0, duration: 0, failed: false });
-    if (!src) return;
+    if (!src || !active || analysisCache.has(src)) return;
     let cancelled = false;
-
-    (async () => {
-      try {
-        // no-referrer is required: fandom hotlink-protection 404s any request
-        // carrying an external Referer (same as the album-art <img>s).
-        const res = await fetch(src, { mode: 'cors', referrerPolicy: 'no-referrer' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const bytes = await res.arrayBuffer();
-        const ctx = getAudioCtx();
-        if (!ctx) throw new Error('no AudioContext');
-        const buf = await ctx.decodeAudioData(bytes);
-        if (!cancelled) {
-          setAnalysis({
-            leadIn: detectLeadIn(buf.getChannelData(0), buf.sampleRate),
-            duration: buf.duration,
-            failed: false,
-          });
-        }
-      } catch {
-        if (!cancelled) setAnalysis({ leadIn: 0, duration: 0, failed: true });
-      }
-    })();
-
+    analyzeAudio(src).then(() => {
+      if (!cancelled) forceUpdate((n) => n + 1);
+    });
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [src, active]);
 
-  return analysis;
+  return cached ?? PENDING_ANALYSIS;
+}
+
+/**
+ * Report when an element has first scrolled into (or near) the viewport, so work
+ * can be deferred until then. Latches true once and stops observing.
+ */
+function useInView<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    if (inView) return;
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setInView(true); // no IO support: don't gate the feature
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          obs.disconnect();
+        }
+      },
+      { rootMargin: '300px' }, // warm up rows just below the fold
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [inView]);
+
+  return [ref, inView] as const;
 }
 
 /**
@@ -333,11 +387,13 @@ function SortableRow({
   const clip = entry.clipId ? clips.find((c) => c.id === entry.clipId) : null;
   const artUrl = song ? getAlbumArtUrl(song, discographyMap) : null;
 
-  // Decode the song's audio for its leading silence + exact duration. Start
-  // times are stored as absolute file offsets (the exporter consumes them) but
-  // shown relative to the music onset, so the blank space at the top of the
-  // file is skipped in the UI.
-  const { leadIn, duration, failed } = useAudioAnalysis(song?.wikiAudioUrl);
+  // Decode the song's audio for its leading silence + exact duration — but only
+  // once the row scrolls into view, so a long timeline doesn't fetch+decode
+  // every off-screen song up front. Start times are stored as absolute file
+  // offsets (the exporter consumes them) but shown relative to the music onset,
+  // so the blank space at the top of the file is skipped in the UI.
+  const [scrubberRef, inView] = useInView<HTMLDivElement>();
+  const { leadIn, duration, failed } = useAudioAnalysis(song?.wikiAudioUrl, inView);
   const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
 
   return (
@@ -416,7 +472,7 @@ function SortableRow({
       </div>
 
       {song?.wikiAudioUrl && (
-        <div className="pl-8 pr-6 sm:pl-12">
+        <div ref={scrubberRef} className="pl-8 pr-6 sm:pl-12">
           <AudioScrubber
             src={song.wikiAudioUrl}
             startTime={entry.songStartTime}
