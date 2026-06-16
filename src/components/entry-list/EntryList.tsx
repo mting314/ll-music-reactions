@@ -489,7 +489,10 @@ function AudioScrubber({
           setIsPlaying(false);
           if (currentlyPlaying === audioRef.current) currentlyPlaying = null;
         }}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          if (currentlyPlaying === audioRef.current) currentlyPlaying = null;
+        }}
         onTimeUpdate={(e) => {
           if (dragging.current) return;
           setPlayRel(clamp(toRel(e.currentTarget.currentTime), markerRel, duration || markerRel));
@@ -519,7 +522,7 @@ function AudioScrubber({
         style={{ width: `${zoom * 100}%` }}
       >
         {/* waveform (behind everything) */}
-        {wavePath ? (
+        {wavePath && peaks.length > 1 ? (
           <svg
             className="pointer-events-none absolute inset-0 h-full w-full text-gray-600"
             viewBox={`0 0 ${Math.max(1, peaks.length - 1)} 2`}
@@ -750,6 +753,7 @@ function SortableRow({
       {song?.wikiAudioUrl && (
         <div ref={scrubberRef} className="pl-8 pr-6 sm:pl-12">
           <AudioScrubber
+            key={entry.songId}
             src={blobUrl}
             startTime={entry.songStartTime}
             leadIn={leadIn}
