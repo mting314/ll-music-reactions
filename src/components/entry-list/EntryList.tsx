@@ -22,24 +22,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { getAlbumArtUrl } from '@/hooks/useData';
 import { detectLeadIn } from '@/utils/audio';
 import { clamp, positionToTime, timeToPercent } from '@/utils/scrubber';
+import { formatTime, parseTime } from '@/utils/time';
 import type { TimelineEntry, Song, Discography, ReactionClip } from '@/types';
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function parseTime(value: string): number | null {
-  const parts = value.split(':');
-  if (parts.length === 2) {
-    const m = parseInt(parts[0]!, 10);
-    const s = parseInt(parts[1]!, 10);
-    if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
-  }
-  const n = parseFloat(value);
-  return isNaN(n) ? null : n;
-}
 
 function TimeInput({ value, onChange }: { value: number | null; onChange: (t: number | null) => void }) {
   const [text, setText] = useState(value != null ? formatTime(value) : '');
@@ -60,15 +44,15 @@ function TimeInput({ value, onChange }: { value: number | null; onChange: (t: nu
   return (
     <input
       type="text"
-      placeholder="0:00"
+      placeholder="0:00.000"
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
-      className="w-14 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs text-gray-300 outline-none focus:ring-1 focus:ring-pink-500"
-      title="Song start time (m:ss)"
+      className="w-20 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs tabular-nums text-gray-300 outline-none focus:ring-1 focus:ring-pink-500"
+      title="Song start time (m:ss.mmm)"
     />
   );
 }
@@ -259,9 +243,10 @@ function AudioScrubber({
     setPlayRel((p) => clamp(p, startRel, duration || startRel));
   }, [startRel, duration]);
 
-  // Commit an absolute file offset, rounded to 0.1s (stable against float noise).
+  // Commit an absolute file offset, rounded to the millisecond (stable against
+  // float noise while preserving the precision needed for an exact start).
   const commit = (rel: number) =>
-    onCommit(Math.round((leadIn + clamp(rel, 0, duration || rel)) * 10) / 10);
+    onCommit(Math.round((leadIn + clamp(rel, 0, duration || rel)) * 1000) / 1000);
 
   const seek = (rel: number) => {
     if (audioRef.current) audioRef.current.currentTime = leadIn + rel;
@@ -344,13 +329,17 @@ function AudioScrubber({
     }
   };
 
-  // ── keyboard (arrow keys nudge by 1s) ─────────────────────────────────────
-  const STEP = 1;
-  const arrowDelta = (key: string) =>
-    key === 'ArrowLeft' ? -STEP : key === 'ArrowRight' ? STEP : 0;
+  // ── keyboard ──────────────────────────────────────────────────────────────
+  // Arrow keys nudge by 0.1s for fine placement; Shift+Arrow by 1s for coarse.
+  const isArrow = (k: string) => k === 'ArrowLeft' || k === 'ArrowRight';
+  const arrowDelta = (e: RKeyboardEvent) => {
+    if (!isArrow(e.key)) return 0;
+    const step = e.shiftKey ? 1 : 0.1;
+    return e.key === 'ArrowLeft' ? -step : step;
+  };
 
   const onMarkerKeyDown = (e: RKeyboardEvent) => {
-    const d = arrowDelta(e.key);
+    const d = arrowDelta(e);
     if (!d || !duration) return;
     e.preventDefault();
     const m = clamp((markerDrag ?? startRel) + d, 0, duration);
@@ -359,12 +348,12 @@ function AudioScrubber({
     keepAudioAtLeast(m);
   };
   const onMarkerKeyUp = (e: RKeyboardEvent) => {
-    if (!arrowDelta(e.key) || markerDrag == null) return;
+    if (!isArrow(e.key) || markerDrag == null) return;
     commit(markerDrag);
     setMarkerDrag(null);
   };
   const onPlayheadKeyDown = (e: RKeyboardEvent) => {
-    const d = arrowDelta(e.key);
+    const d = arrowDelta(e);
     if (!d || !duration) return;
     e.preventDefault();
     const ph = clamp(playRel + d, markerRel, duration);
@@ -476,7 +465,7 @@ function AudioScrubber({
         </div>
       </div>
 
-      <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
+      <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
         {formatTime(playRel)}
       </span>
     </div>
@@ -594,7 +583,10 @@ function SortableRow({
           <TimeInput
             value={relStart}
             onChange={(t) =>
-              onUpdateStartTime(entry.id, t == null ? null : t + leadIn)
+              onUpdateStartTime(
+                entry.id,
+                t == null ? null : Math.round((t + leadIn) * 1000) / 1000,
+              )
             }
           />
         )}
