@@ -209,6 +209,7 @@ function AudioScrubber({
   duration: decodedDuration,
   failed,
   onCommit,
+  onScrub,
 }: {
   src: string;
   startTime: number | null;
@@ -216,6 +217,10 @@ function AudioScrubber({
   duration: number;
   failed: boolean;
   onCommit: (t: number) => void;
+  // Live (uncommitted) marker position in onset-relative seconds while dragging,
+  // null when the drag ends. Lets the displayed start time track the scrub in
+  // realtime without committing (and flooding undo history) on every move.
+  onScrub?: (rel: number | null) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -309,6 +314,7 @@ function AudioScrubber({
     if (dragging.current === 'marker') {
       const m = clamp(t, 0, duration);
       setMarkerDrag(m);
+      onScrub?.(m); // update the displayed start time live
       setPlayRel((p) => Math.max(p, m)); // playhead can't precede the marker
       keepAudioAtLeast(m); // and neither can in-flight playback
     } else {
@@ -326,6 +332,7 @@ function AudioScrubber({
     if (which === 'marker' && markerDrag != null) {
       if (markerDrag !== startRel) commit(markerDrag); // skip no-op (bare click)
       setMarkerDrag(null);
+      onScrub?.(null); // clear the live override; display falls back to committed
     }
   };
 
@@ -344,6 +351,7 @@ function AudioScrubber({
     e.preventDefault();
     const m = clamp((markerDrag ?? startRel) + d, 0, duration);
     setMarkerDrag(m);
+    onScrub?.(m);
     setPlayRel((p) => Math.max(p, m));
     keepAudioAtLeast(m);
   };
@@ -351,6 +359,7 @@ function AudioScrubber({
     if (!isArrow(e.key) || markerDrag == null) return;
     commit(markerDrag);
     setMarkerDrag(null);
+    onScrub?.(null);
   };
   const onPlayheadKeyDown = (e: RKeyboardEvent) => {
     const d = arrowDelta(e);
@@ -527,6 +536,10 @@ function SortableRow({
   const [scrubberRef, inView] = useInView<HTMLDivElement>();
   const { leadIn, duration, failed } = useAudioAnalysis(song?.wikiAudioUrl, inView);
   const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
+  // Live marker position while it's being dragged, so the displayed start time
+  // tracks the scrub in realtime; the actual commit still happens on release.
+  const [liveStartRel, setLiveStartRel] = useState<number | null>(null);
+  const shownStartRel = liveStartRel ?? relStart;
 
   return (
     <div
@@ -581,7 +594,7 @@ function SortableRow({
 
         {song && (
           <TimeInput
-            value={relStart}
+            value={shownStartRel}
             onChange={(t) =>
               onUpdateStartTime(
                 entry.id,
@@ -614,6 +627,7 @@ function SortableRow({
             leadIn={leadIn}
             duration={duration}
             failed={failed}
+            onScrub={setLiveStartRel}
             onCommit={(t) => onUpdateStartTime(entry.id, t)}
           />
         </div>
