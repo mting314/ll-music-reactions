@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Fandom (wikia) hotlink-protects its media: any external Referer 404s.
+         Drop the Referer on all subresource requests so song audio (and album
+         art) load. Media elements ignore a per-element referrerpolicy, so this
+         document-level policy is the reliable fix. -->
+    <meta name="referrer" content="no-referrer" />
     <title>LL Music Reactions</title>
   </head>
   <body>

@@ -1,6 +1,14 @@
 import { mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import { setDefaultResultOrder } from "node:dns";
+
+// Cloud Run has no public IPv6 egress. Some asset hosts are dual-stack with many
+// AAAA records (e.g. album art on m.media-amazon.com — 8 IPv6 vs 1 IPv4); if a
+// fetch connects to an unroutable IPv6 address the download hangs forever.
+// Prefer IPv4 so fetches resolve to a routable address. The per-asset timeout in
+// downloadFile() is the backstop if a host is IPv6-only or still stalls.
+setDefaultResultOrder("ipv4first");
 import {
   buildFfmpegArgs,
   buildFilterComplex,
@@ -37,14 +45,37 @@ type ExportEvent =
 
 type Emit = (event: ExportEvent) => void;
 
-async function downloadFile(url: string, dest: string): Promise<boolean> {
+// Bound every asset download. Without this a single slow/stalling remote
+// (Amazon art or wikia audio) hangs the whole export forever — the fetch never
+// resolves, so neither the success nor the failure path runs. On timeout we
+// fail this one asset and let the entry render without it (same as a 404).
+const ASSET_TIMEOUT_MS = 20_000;
+
+async function downloadFile(
+  url: string,
+  dest: string,
+): Promise<{ ok: boolean; reason?: "http" | "timeout" | "error"; ms: number }> {
+  const started = Date.now();
+  // Own the AbortController so the timeout tears down the socket. We consume the
+  // body with arrayBuffer() (which observes the abort) instead of
+  // Bun.write(dest, resp) — the latter can keep waiting on a stalled body even
+  // after the fetch signal aborts, defeating the timeout.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ASSET_TIMEOUT_MS);
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) return false;
-    await Bun.write(dest, resp);
-    return true;
+    const resp = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
+    if (!resp.ok) return { ok: false, reason: "http", ms: Date.now() - started };
+    const bytes = await resp.arrayBuffer();
+    await Bun.write(dest, bytes);
+    return { ok: true, ms: Date.now() - started };
   } catch {
-    return false;
+    return {
+      ok: false,
+      reason: ctrl.signal.aborted ? "timeout" : "error",
+      ms: Date.now() - started,
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -69,7 +100,12 @@ async function runExport(
     let artIdx: number | null = null;
     if (entry.albumArtUrl) {
       const artFile = join(workDir, `art${i}.jpg`);
-      if (await downloadFile(entry.albumArtUrl, artFile)) {
+      // Log BEFORE fetching so a hang is visible (shows the in-flight URL).
+      log("INFO", "export.asset.fetch_start", {
+        requestId, index: i, asset: "albumArt", url: entry.albumArtUrl,
+      });
+      const res = await downloadFile(entry.albumArtUrl, artFile);
+      if (res.ok) {
         inputArgs.push("-i", artFile);
         artIdx = inputIdx++;
       } else {
@@ -78,6 +114,8 @@ async function runExport(
           requestId,
           index: i,
           asset: "albumArt",
+          reason: res.reason,
+          ms: res.ms,
           url: entry.albumArtUrl,
           song: entry.songName,
         });
@@ -87,7 +125,11 @@ async function runExport(
     let audioIdx: number | null = null;
     if (entry.songAudioUrl) {
       const audioFile = join(workDir, `song${i}.ogg`);
-      if (await downloadFile(entry.songAudioUrl, audioFile)) {
+      log("INFO", "export.asset.fetch_start", {
+        requestId, index: i, asset: "songAudio", url: entry.songAudioUrl,
+      });
+      const res = await downloadFile(entry.songAudioUrl, audioFile);
+      if (res.ok) {
         inputArgs.push("-i", audioFile);
         audioIdx = inputIdx++;
       } else {
@@ -95,6 +137,8 @@ async function runExport(
           requestId,
           index: i,
           asset: "songAudio",
+          reason: res.reason,
+          ms: res.ms,
           url: entry.songAudioUrl,
           song: entry.songName,
         });

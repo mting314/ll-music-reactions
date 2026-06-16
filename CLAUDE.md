@@ -122,6 +122,23 @@ by GitHub Pages — the CDN the frontend reads. The pipeline job pushes to it.)
   Amazon listing legitimately have no art (the app shows a placeholder — not a
   bug). The Data viewer surfaces "songs without album art".
 - Album-art `<img>` needs `crossOrigin="anonymous"` (COEP/CORP).
+- **Fandom (wikia) media hotlink-protection:** song audio (`wikiAudioUrl`,
+  `static.wikia.nocookie.net`) **404s on any external `Referer`** (localhost,
+  github.io, even empty — only a fandom Referer or *no* Referer returns 200).
+  `Origin` is irrelevant; it's not CORS. Fix is a document-level
+  `<meta name="referrer" content="no-referrer">` in `index.html` (media elements
+  ignore a per-element `referrerpolicy`, unlike `<img>`). Also pass
+  `referrerPolicy: 'no-referrer'` on any `fetch()` of these URLs. Symptom if
+  missing: every `<audio>`/decode 404s while a plain `curl` (no Referer) 200s.
 - GitHub Pages forces `Cache-Control: max-age=600` on the data files (can't set
   `no-cache`) — fine for once-daily data; ~10-min propagation after a refresh.
 - GCP project: `future-name-201021` (= project number 278890546984).
+- **Export server + Cloud Run IPv6 egress:** Cloud Run has **no public IPv6
+  egress** by default. The album-art host `m.media-amazon.com` is dual-stack
+  (8 AAAA vs 1 A); without forcing IPv4, `fetch` connects to an unroutable IPv6
+  address and **hangs forever** (the audio host `static.wikia.nocookie.net` is
+  IPv4-only, so audio never hit this). Fix in `server/export.ts`:
+  `setDefaultResultOrder("ipv4first")` + a per-asset `AbortController` timeout
+  (consume the body via `arrayBuffer()`, not `Bun.write(dest, resp)` — the latter
+  ignores the abort and keeps the hang). Logs `export.asset.fetch_start` before
+  each download so an in-flight stall shows its URL.
