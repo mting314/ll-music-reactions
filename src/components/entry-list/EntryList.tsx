@@ -316,12 +316,11 @@ function AudioScrubber({
       setMarkerDrag(m);
       onScrub?.(m); // update the displayed start time live
       setPlayRel((p) => Math.max(p, m)); // playhead can't precede the marker
-      keepAudioAtLeast(m); // and neither can in-flight playback
     } else {
-      const ph = clamp(t, markerRel, duration);
-      setPlayRel(ph);
-      seek(ph);
+      setPlayRel(clamp(t, markerRel, duration));
     }
+    // NB: no seek() here — seeking on every move restarts playback constantly
+    // while scrubbing. We move the handle live and seek once, on release.
   };
 
   const onPointerEnd = (e: RPointerEvent<HTMLDivElement>) => {
@@ -329,10 +328,17 @@ function AudioScrubber({
     if (!which) return;
     dragging.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
-    if (which === 'marker' && markerDrag != null) {
-      if (markerDrag !== startRel) commit(markerDrag); // skip no-op (bare click)
-      setMarkerDrag(null);
-      onScrub?.(null); // clear the live override; display falls back to committed
+    if (which === 'marker') {
+      if (markerDrag != null) {
+        if (markerDrag !== startRel) commit(markerDrag); // skip no-op (bare click)
+        keepAudioAtLeast(markerDrag); // pull in-flight playback up to the in-point
+        setMarkerDrag(null);
+        onScrub?.(null); // clear the live override; display falls back to committed
+      }
+    } else {
+      // Seek to the chosen playhead only now, on release — so scrubbing doesn't
+      // restart playback on every move.
+      seek(playRel);
     }
   };
 
