@@ -65,6 +65,9 @@ interface AudioAnalysis {
   leadIn: number;
   duration: number;
   failed: boolean;
+  // Object URL for the downloaded audio, reused for playback so the file is
+  // fetched once (decode + <audio> share it) instead of downloaded twice.
+  blobUrl: string | null;
 }
 
 // A single shared AudioContext for ALL decodes. Browsers hard-cap the number of
@@ -83,7 +86,12 @@ function getAudioCtx(): AudioContext | null {
   return sharedAudioCtx;
 }
 
-const PENDING_ANALYSIS: AudioAnalysis = { leadIn: 0, duration: 0, failed: false };
+const PENDING_ANALYSIS: AudioAnalysis = {
+  leadIn: 0,
+  duration: 0,
+  failed: false,
+  blobUrl: null,
+};
 
 // Decoded results are cached by URL (module scope) so a song is only ever
 // fetched + decoded once — across rows, reorders, remounts, and duplicate songs.
@@ -109,17 +117,20 @@ function analyzeAudio(src: string): Promise<AudioAnalysis> {
       // carrying an external Referer (same as the album-art <img>s).
       const res = await fetch(src, { mode: 'cors', referrerPolicy: 'no-referrer' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const bytes = await res.arrayBuffer();
+      // Keep the bytes as a Blob for playback; arrayBuffer() gives a copy for
+      // decode (decodeAudioData detaches its input, leaving the Blob intact).
+      const blob = await res.blob();
       const ctx = getAudioCtx();
       if (!ctx) throw new Error('no AudioContext');
-      const buf = await ctx.decodeAudioData(bytes);
+      const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
       return {
         leadIn: detectLeadIn(buf.getChannelData(0), buf.sampleRate),
         duration: buf.duration,
         failed: false,
+        blobUrl: URL.createObjectURL(blob),
       };
     } catch {
-      return { leadIn: 0, duration: 0, failed: true };
+      return { leadIn: 0, duration: 0, failed: true, blobUrl: null };
     }
   })()
     .then((a) => {
@@ -207,14 +218,19 @@ function AudioScrubber({
   startTime,
   leadIn,
   duration: decodedDuration,
+  clipLength,
   failed,
   onCommit,
   onScrub,
 }: {
-  src: string;
+  // Object URL for playback (null until the audio has been fetched/decoded).
+  src: string | null;
   startTime: number | null;
   leadIn: number;
   duration: number;
+  // Length of the attached reaction clip in seconds, or null when no clip is
+  // set. Drives the end marker — the song plays under the clip for this long.
+  clipLength: number | null;
   failed: boolean;
   onCommit: (t: number) => void;
   // Live (uncommitted) marker position in onset-relative seconds while dragging,
@@ -235,6 +251,12 @@ function AudioScrubber({
   // start. Lets the marker move live before the commit on release.
   const [markerDrag, setMarkerDrag] = useState<number | null>(null);
   const markerRel = clamp(markerDrag ?? startRel, 0, duration || (markerDrag ?? startRel));
+
+  // End marker: a fixed clip-length ahead of the start (the slice of the song
+  // that actually plays under the clip). Tracks the start marker; not separately
+  // draggable. null when no clip is attached.
+  const endRel =
+    clipLength != null && duration ? clamp(markerRel + clipLength, markerRel, duration) : null;
 
   const [playRel, setPlayRel] = useState(startRel);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -400,11 +422,10 @@ function AudioScrubber({
     <div className="flex items-center gap-2">
       <audio
         ref={audioRef}
-        src={src}
-        // The decode fetch already pulls the full file for lead-in/duration;
-        // let the element load lazily on play to avoid a second eager fetch.
-        preload="none"
-        crossOrigin="anonymous"
+        // Same-origin blob URL from the single decode fetch — no second download,
+        // and no CORS/referrer concerns on the element. Empty until decoded.
+        src={src ?? undefined}
+        preload="auto"
         onPlay={() => {
           if (currentlyPlaying && currentlyPlaying !== audioRef.current) {
             currentlyPlaying.pause();
@@ -449,10 +470,13 @@ function AudioScrubber({
       >
         {/* base rail */}
         <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
-        {/* active region from the marker to the end (what actually plays/exports) */}
+        {/* used region — [start, end] when a clip sets the end, else to the end */}
         <div
-          className="absolute top-1/2 right-0 h-1 -translate-y-1/2 rounded-r-full bg-pink-600/50"
-          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
+          className="absolute top-1/2 h-1 -translate-y-1/2 bg-pink-600/50"
+          style={{
+            left: `${timeToPercent(markerRel, duration)}%`,
+            width: `${timeToPercent((endRel ?? duration) - markerRel, duration)}%`,
+          }}
         />
         {/* playhead (preview position) — visual; the track handles its drag */}
         <div
@@ -463,10 +487,19 @@ function AudioScrubber({
           aria-valuemax={duration}
           aria-valuenow={playRel}
           onKeyDown={onPlayheadKeyDown}
-          className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
+          className="pointer-events-none absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
           style={{ left: `${timeToPercent(playRel, duration)}%`, transition: playheadGlide }}
         />
-        {/* start marker (in-point) — draggable, sits on top */}
+        {/* end marker (out-point) — derived from clip length; not draggable */}
+        {endRel != null && (
+          <div
+            className="pointer-events-none absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-pink-400/70"
+            style={{ left: `${timeToPercent(endRel, duration)}%` }}
+            title="Clip end"
+          />
+        )}
+        {/* start marker (in-point) — draggable, full-height so it stays visible
+            even when the playhead sits on top of it */}
         <div
           role="slider"
           tabIndex={duration ? 0 : -1}
@@ -481,11 +514,11 @@ function AudioScrubber({
           onKeyDown={onMarkerKeyDown}
           onKeyUp={onMarkerKeyUp}
           title="Drag to set the song start time"
-          className="absolute top-0 bottom-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none focus:outline-none"
+          className="absolute inset-y-0 z-30 flex w-3 -translate-x-1/2 cursor-ew-resize touch-none justify-center focus:outline-none"
           style={{ left: `${timeToPercent(markerRel, duration)}%` }}
         >
-          <div className="mx-auto h-full w-0.5 bg-pink-500" />
-          <div className="absolute -top-px left-1/2 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-pink-500" />
+          <div className="h-full w-0.5 bg-pink-500" />
+          <div className="absolute -top-px h-1.5 w-1.5 rotate-45 bg-pink-500" />
         </div>
       </div>
 
@@ -549,7 +582,7 @@ function SortableRow({
   // offsets (the exporter consumes them) but shown relative to the music onset,
   // so the blank space at the top of the file is skipped in the UI.
   const [scrubberRef, inView] = useInView<HTMLDivElement>();
-  const { leadIn, duration, failed } = useAudioAnalysis(song?.wikiAudioUrl, inView);
+  const { leadIn, duration, failed, blobUrl } = useAudioAnalysis(song?.wikiAudioUrl, inView);
   const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
   // Live marker position while it's being dragged, so the displayed start time
   // tracks the scrub in realtime; the actual commit still happens on release.
@@ -637,10 +670,11 @@ function SortableRow({
       {song?.wikiAudioUrl && (
         <div ref={scrubberRef} className="pl-8 pr-6 sm:pl-12">
           <AudioScrubber
-            src={song.wikiAudioUrl}
+            src={blobUrl}
             startTime={entry.songStartTime}
             leadIn={leadIn}
             duration={duration}
+            clipLength={clip ? clip.durationMs / 1000 : null}
             failed={failed}
             onScrub={setLiveStartRel}
             onCommit={(t) => onUpdateStartTime(entry.id, t)}
