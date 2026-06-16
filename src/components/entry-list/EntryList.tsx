@@ -238,7 +238,14 @@ function AudioScrubber({
 
   const [playRel, setPlayRel] = useState(startRel);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const dragging = useRef<null | 'marker' | 'playhead'>(null);
+
+  // During playback the playhead only advances on `timeupdate` (~4Hz), which
+  // looks steppy — glide it with a CSS transition that bridges the gap between
+  // updates. Disable the transition while scrubbing so the handle tracks the
+  // pointer instantly (technique borrowed from the-sorter's heardle player).
+  const playheadGlide = isPlaying && !isScrubbing ? 'left 0.25s linear' : 'none';
 
   // Keep the playhead within [marker, end] as the start/length change (marker
   // moved past the playhead, or decode resolving the duration). Skip while
@@ -284,9 +291,9 @@ function AudioScrubber({
     if (!duration) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragging.current = 'playhead';
-    const t = clamp(timeAt(e.clientX), markerRel, duration);
-    setPlayRel(t);
-    seek(t);
+    setIsScrubbing(true);
+    // Move the handle but don't seek yet — a click or drag seeks once on release.
+    setPlayRel(clamp(timeAt(e.clientX), markerRel, duration));
   };
 
   // Pointerdown on the marker handle drags the start point (stops propagation so
@@ -296,6 +303,7 @@ function AudioScrubber({
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragging.current = 'marker';
+    setIsScrubbing(true);
     // Start from the marker's current position — don't jump (or commit) to the
     // click X, so a bare click doesn't nudge a carefully-set start time. The
     // value only changes once the pointer actually moves.
@@ -327,6 +335,7 @@ function AudioScrubber({
     const which = dragging.current;
     if (!which) return;
     dragging.current = null;
+    setIsScrubbing(false);
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     if (which === 'marker') {
       if (markerDrag != null) {
@@ -455,7 +464,7 @@ function AudioScrubber({
           aria-valuenow={playRel}
           onKeyDown={onPlayheadKeyDown}
           className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
-          style={{ left: `${timeToPercent(playRel, duration)}%` }}
+          style={{ left: `${timeToPercent(playRel, duration)}%`, transition: playheadGlide }}
         />
         {/* start marker (in-point) — draggable, sits on top */}
         <div
