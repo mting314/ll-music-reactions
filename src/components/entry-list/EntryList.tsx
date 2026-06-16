@@ -1,4 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  type PointerEvent as RPointerEvent,
+  type KeyboardEvent as RKeyboardEvent,
+} from 'react';
 import {
   DndContext,
   closestCenter,
@@ -14,25 +21,10 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getAlbumArtUrl } from '@/hooks/useData';
-import { detectLeadIn } from '@/utils/audio';
+import { detectLeadIn, computePeaks } from '@/utils/audio';
+import { clamp, positionToTime, timeToPercent, waveformPath } from '@/utils/scrubber';
+import { formatTime, parseTime } from '@/utils/time';
 import type { TimelineEntry, Song, Discography, ReactionClip } from '@/types';
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function parseTime(value: string): number | null {
-  const parts = value.split(':');
-  if (parts.length === 2) {
-    const m = parseInt(parts[0]!, 10);
-    const s = parseInt(parts[1]!, 10);
-    if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
-  }
-  const n = parseFloat(value);
-  return isNaN(n) ? null : n;
-}
 
 function TimeInput({ value, onChange }: { value: number | null; onChange: (t: number | null) => void }) {
   const [text, setText] = useState(value != null ? formatTime(value) : '');
@@ -53,15 +45,15 @@ function TimeInput({ value, onChange }: { value: number | null; onChange: (t: nu
   return (
     <input
       type="text"
-      placeholder="0:00"
+      placeholder="0:00.000"
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
-      className="w-14 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs text-gray-300 outline-none focus:ring-1 focus:ring-pink-500"
-      title="Song start time (m:ss)"
+      className="w-20 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs tabular-nums text-gray-300 outline-none focus:ring-1 focus:ring-pink-500"
+      title="Song start time (m:ss.mmm)"
     />
   );
 }
@@ -74,7 +66,16 @@ interface AudioAnalysis {
   leadIn: number;
   duration: number;
   failed: boolean;
+  // Object URL for the downloaded audio, reused for playback so the file is
+  // fetched once (decode + <audio> share it) instead of downloaded twice.
+  blobUrl: string | null;
+  // Normalized waveform peaks (post-lead-in), for drawing the timeline.
+  peaks: number[];
 }
+
+// Waveform resolution — peaks per song. ~enough detail at the 8× max zoom
+// without bloating the cached path string.
+const WAVE_BUCKETS = 500;
 
 // A single shared AudioContext for ALL decodes. Browsers hard-cap the number of
 // AudioContexts (~6 in Chrome) and throw once exceeded — creating one per row
@@ -92,7 +93,13 @@ function getAudioCtx(): AudioContext | null {
   return sharedAudioCtx;
 }
 
-const PENDING_ANALYSIS: AudioAnalysis = { leadIn: 0, duration: 0, failed: false };
+const PENDING_ANALYSIS: AudioAnalysis = {
+  leadIn: 0,
+  duration: 0,
+  failed: false,
+  blobUrl: null,
+  peaks: [],
+};
 
 // Decoded results are cached by URL (module scope) so a song is only ever
 // fetched + decoded once — across rows, reorders, remounts, and duplicate songs.
@@ -118,17 +125,23 @@ function analyzeAudio(src: string): Promise<AudioAnalysis> {
       // carrying an external Referer (same as the album-art <img>s).
       const res = await fetch(src, { mode: 'cors', referrerPolicy: 'no-referrer' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const bytes = await res.arrayBuffer();
+      // Keep the bytes as a Blob for playback; arrayBuffer() gives a copy for
+      // decode (decodeAudioData detaches its input, leaving the Blob intact).
+      const blob = await res.blob();
       const ctx = getAudioCtx();
       if (!ctx) throw new Error('no AudioContext');
-      const buf = await ctx.decodeAudioData(bytes);
+      const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+      const channel = buf.getChannelData(0);
+      const leadIn = detectLeadIn(channel, buf.sampleRate);
       return {
-        leadIn: detectLeadIn(buf.getChannelData(0), buf.sampleRate),
+        leadIn,
         duration: buf.duration,
         failed: false,
+        blobUrl: URL.createObjectURL(blob),
+        peaks: computePeaks(channel, Math.floor(leadIn * buf.sampleRate), WAVE_BUCKETS),
       };
     } catch {
-      return { leadIn: 0, duration: 0, failed: true };
+      return { leadIn: 0, duration: 0, failed: true, blobUrl: null, peaks: [] };
     }
   })()
     .then((a) => {
@@ -198,49 +211,113 @@ function useInView<T extends Element>() {
 }
 
 /**
- * A mini audio player + scrubber. The slider's resting position IS the song's
- * start timestamp: drag it (or play and pause at the right spot) to set where
- * the song begins in the exported video.
+ * A two-handle audio scrubber, like a video editor's timeline:
  *
- * All positions here are **relative to the music onset** (`leadIn`): the slider
- * shows time-since-sound-start, while `startTime`/`onCommit` are absolute file
- * offsets (what the exporter consumes). leadIn bridges the two so the leading
- * silence is skipped from the user's point of view.
+ *  - a **start marker** (the in-point) = the song's start timestamp. Drag it to
+ *    set where the song begins in the export; it is the ONLY control that
+ *    commits a value.
+ *  - a **playhead** that follows playback and can be scrubbed for preview, but
+ *    is constrained to never sit before the marker and never commits anything.
+ *
+ * All positions are **relative to the music onset** (`leadIn`): the track shows
+ * time-since-sound-start, while `startTime`/`onCommit` are absolute file offsets
+ * (what the exporter consumes). leadIn bridges the two so the leading silence is
+ * skipped from the user's point of view.
  */
 function AudioScrubber({
   src,
   startTime,
   leadIn,
   duration: decodedDuration,
+  peaks,
   failed,
   onCommit,
+  onScrub,
 }: {
-  src: string;
+  // Object URL for playback (null until the audio has been fetched/decoded).
+  src: string | null;
   startTime: number | null;
   leadIn: number;
   duration: number;
+  // Normalized waveform peaks for the timeline; empty until decoded.
+  peaks: number[];
   failed: boolean;
   onCommit: (t: number) => void;
+  // Live (uncommitted) marker position in onset-relative seconds while dragging,
+  // null when the drag ends. Lets the displayed start time track the scrub in
+  // realtime without committing (and flooding undo history) on every move.
+  onScrub?: (rel: number | null) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const toRel = (abs: number) => Math.max(0, abs - leadIn);
-  const [position, setPosition] = useState(toRel(startTime ?? leadIn));
-  const [isPlaying, setIsPlaying] = useState(false);
-  const draggingRef = useRef(false);
 
   // Audible length, relative to the music onset. Sourced from the decoded
   // buffer — the <audio> element reports Infinity for Ogg until fully buffered.
   const duration = Math.max(0, decodedDuration - leadIn);
 
-  // Follow external start-time / lead-in changes (typed in the text box, or the
-  // lead-in finishing decode) while the user isn't scrubbing or listening.
-  useEffect(() => {
-    if (!draggingRef.current && !isPlaying) setPosition(toRel(startTime ?? leadIn));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startTime, leadIn, isPlaying]);
+  // Waveform path is derived purely from the (stable, cached) peaks — memoize so
+  // it isn't rebuilt on every drag/playback render.
+  const wavePath = useMemo(() => waveformPath(peaks), [peaks]);
 
-  // Commit an absolute file offset, rounded to 0.1s (stable against float noise).
-  const commit = (rel: number) => onCommit(Math.round((leadIn + rel) * 10) / 10);
+  const startRel = toRel(startTime ?? leadIn);
+  // Local marker position while it's being dragged; null = reflect the committed
+  // start. Lets the marker move live before the commit on release.
+  const [markerDrag, setMarkerDrag] = useState<number | null>(null);
+  const markerRel = clamp(markerDrag ?? startRel, 0, duration || (markerDrag ?? startRel));
+
+  const [playRel, setPlayRel] = useState(startRel);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  // Timeline zoom: the inner track is `zoom`× the container width, scrolled
+  // horizontally — more pixels per second means finer marker/playhead placement.
+  const [zoom, setZoom] = useState(1);
+  const dragging = useRef<null | 'marker' | 'playhead'>(null);
+  // Whether playback was running when a scrub started, so we can resume on release.
+  const wasPlaying = useRef(false);
+
+  // During playback the playhead only advances on `timeupdate` (~4Hz), which
+  // looks steppy — glide it with a CSS transition that bridges the gap between
+  // updates. Disable the transition while scrubbing so the handle tracks the
+  // pointer instantly (technique borrowed from the-sorter's heardle player).
+  const playheadGlide = isPlaying && !isScrubbing ? 'left 0.25s linear' : 'none';
+
+  // Keep the playhead within [marker, end] as the start/length change (marker
+  // moved past the playhead, or decode resolving the duration). Skip while
+  // dragging so we don't fight the pointer.
+  useEffect(() => {
+    if (dragging.current) return;
+    setPlayRel((p) => clamp(p, startRel, duration || startRel));
+  }, [startRel, duration]);
+
+  // Horizontal-scroll the zoomed timeline so the playhead stays in view:
+  // `center` recenters it (used when zoom changes); otherwise only scroll once
+  // it nears an edge (used as playback advances).
+  const scrollPlayheadIntoView = (center: boolean) => {
+    const c = scrollRef.current;
+    if (!c || !duration) return;
+    const px = (playRel / duration) * c.scrollWidth;
+    const margin = c.clientWidth * 0.15;
+    if (center || px < c.scrollLeft + margin || px > c.scrollLeft + c.clientWidth - margin) {
+      c.scrollLeft = clamp(px - c.clientWidth / 2, 0, c.scrollWidth - c.clientWidth);
+    }
+  };
+  // Recenter on the playhead when the zoom level changes.
+  useEffect(() => {
+    scrollPlayheadIntoView(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
+  // Follow the playhead as it advances during playback.
+  useEffect(() => {
+    if (isPlaying && !isScrubbing) scrollPlayheadIntoView(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRel, isPlaying, isScrubbing]);
+
+  // Commit an absolute file offset, rounded to the millisecond (stable against
+  // float noise while preserving the precision needed for an exact start).
+  const commit = (rel: number) =>
+    onCommit(Math.round((leadIn + clamp(rel, 0, duration || rel)) * 1000) / 1000);
 
   const seek = (rel: number) => {
     if (audioRef.current) audioRef.current.currentTime = leadIn + rel;
@@ -251,10 +328,132 @@ function AudioScrubber({
     if (!audio) return;
     if (isPlaying) {
       audio.pause();
-    } else {
-      audio.currentTime = leadIn + position;
-      audio.play().catch(() => {});
+      return;
     }
+    // Play from the playhead; if it's parked at (or ~at) the end, restart from
+    // the marker. The epsilon covers timeupdate landing just shy of duration.
+    const from = playRel < duration - 0.1 ? playRel : markerRel;
+    setPlayRel(from);
+    audio.currentTime = leadIn + from;
+    audio.play().catch(() => {});
+  };
+
+  // ── pointer dragging ──────────────────────────────────────────────────────
+  const timeAt = (clientX: number) => {
+    const r = trackRef.current?.getBoundingClientRect();
+    return r ? positionToTime(clientX, r.left, r.width, duration) : 0;
+  };
+
+  // Pointerdown on the track background (or the playhead thumb) scrubs the
+  // playhead — clamped so it can never land before the marker.
+  // Pause playback for the duration of a scrub; remember to resume on release.
+  const beginScrub = () => {
+    setIsScrubbing(true);
+    wasPlaying.current = isPlaying;
+    if (isPlaying) audioRef.current?.pause();
+  };
+
+  const onTrackPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragging.current = 'playhead';
+    beginScrub();
+    // Move the handle but don't seek yet — a click or drag seeks once on release.
+    setPlayRel(clamp(timeAt(e.clientX), markerRel, duration));
+  };
+
+  // Pointerdown on the marker handle drags the start point (stops propagation so
+  // it doesn't also scrub the playhead).
+  const onMarkerPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragging.current = 'marker';
+    beginScrub();
+    // Start from the marker's current position — don't jump (or commit) to the
+    // click X, so a bare click doesn't nudge a carefully-set start time. The
+    // value only changes once the pointer actually moves.
+    setMarkerDrag(markerRel);
+  };
+
+  // Keep audio at/after the marker so playback never sounds before the in-point.
+  const keepAudioAtLeast = (rel: number) => {
+    const audio = audioRef.current;
+    if (audio && audio.currentTime < leadIn + rel) audio.currentTime = leadIn + rel;
+  };
+
+  const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const t = timeAt(e.clientX);
+    if (dragging.current === 'marker') {
+      const m = clamp(t, 0, duration);
+      setMarkerDrag(m);
+      onScrub?.(m); // update the displayed start time live
+      setPlayRel((p) => Math.max(p, m)); // playhead can't precede the marker
+    } else {
+      setPlayRel(clamp(t, markerRel, duration));
+    }
+    // NB: no seek() here — seeking on every move restarts playback constantly
+    // while scrubbing. We move the handle live and seek once, on release.
+  };
+
+  const onPointerEnd = (e: RPointerEvent<HTMLDivElement>) => {
+    const which = dragging.current;
+    if (!which) return;
+    dragging.current = null;
+    setIsScrubbing(false);
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (which === 'marker') {
+      if (markerDrag != null) {
+        if (markerDrag !== startRel) commit(markerDrag); // skip no-op (bare click)
+        keepAudioAtLeast(markerDrag); // pull in-flight playback up to the in-point
+        setMarkerDrag(null);
+        onScrub?.(null); // clear the live override; display falls back to committed
+      }
+    } else {
+      // Seek to the chosen playhead only now, on release — so scrubbing doesn't
+      // restart playback on every move.
+      seek(playRel);
+    }
+    // Resume playback if the scrub interrupted it (pause-while-scrubbing).
+    if (wasPlaying.current) {
+      wasPlaying.current = false;
+      audioRef.current?.play().catch(() => {});
+    }
+  };
+
+  // ── keyboard ──────────────────────────────────────────────────────────────
+  // Arrow keys nudge by 0.1s for fine placement; Shift+Arrow by 1s for coarse.
+  const isArrow = (k: string) => k === 'ArrowLeft' || k === 'ArrowRight';
+  const arrowDelta = (e: RKeyboardEvent) => {
+    if (!isArrow(e.key)) return 0;
+    const step = e.shiftKey ? 1 : 0.1;
+    return e.key === 'ArrowLeft' ? -step : step;
+  };
+
+  const onMarkerKeyDown = (e: RKeyboardEvent) => {
+    const d = arrowDelta(e);
+    if (!d || !duration) return;
+    e.preventDefault();
+    const m = clamp((markerDrag ?? startRel) + d, 0, duration);
+    setMarkerDrag(m);
+    onScrub?.(m);
+    setPlayRel((p) => Math.max(p, m));
+    keepAudioAtLeast(m);
+  };
+  const onMarkerKeyUp = (e: RKeyboardEvent) => {
+    if (!isArrow(e.key) || markerDrag == null) return;
+    commit(markerDrag);
+    setMarkerDrag(null);
+    onScrub?.(null);
+  };
+  const onPlayheadKeyDown = (e: RKeyboardEvent) => {
+    const d = arrowDelta(e);
+    if (!d || !duration) return;
+    e.preventDefault();
+    const ph = clamp(playRel + d, markerRel, duration);
+    setPlayRel(ph);
+    seek(ph);
   };
 
   // The audio file is missing/undecodable (e.g. a stale 404 wikiAudioUrl, or an
@@ -272,11 +471,10 @@ function AudioScrubber({
     <div className="flex items-center gap-2">
       <audio
         ref={audioRef}
-        src={src}
-        // The decode fetch already pulls the full file for lead-in/duration;
-        // let the element load lazily on play to avoid a second eager fetch.
-        preload="none"
-        crossOrigin="anonymous"
+        // Same-origin blob URL from the single decode fetch — no second download,
+        // and no CORS/referrer concerns on the element. Empty until decoded.
+        src={src ?? undefined}
+        preload="auto"
         onPlay={() => {
           if (currentlyPlaying && currentlyPlaying !== audioRef.current) {
             currentlyPlaying.pause();
@@ -291,51 +489,122 @@ function AudioScrubber({
           setIsPlaying(false);
           if (currentlyPlaying === audioRef.current) currentlyPlaying = null;
         }}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          if (currentlyPlaying === audioRef.current) currentlyPlaying = null;
+        }}
         onTimeUpdate={(e) => {
-          if (!draggingRef.current) setPosition(toRel(e.currentTarget.currentTime));
+          if (dragging.current) return;
+          setPlayRel(clamp(toRel(e.currentTarget.currentTime), markerRel, duration || markerRel));
         }}
       />
 
       <button
         onClick={togglePlay}
-        className="shrink-0 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-        title={isPlaying ? 'Pause' : 'Play from start time'}
+        disabled={!duration}
+        className="shrink-0 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40"
+        title={isPlaying ? 'Pause' : 'Play from the playhead'}
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? '❚❚' : '►'}
       </button>
 
-      <input
-        type="range"
-        min={0}
-        max={duration}
-        step={0.1}
-        value={Math.min(position, duration)}
-        disabled={!duration}
-        onChange={(e) => {
-          const rel = parseFloat(e.target.value);
-          draggingRef.current = true;
-          setPosition(rel);
-          seek(rel);
-        }}
-        onPointerUp={() => {
-          if (!draggingRef.current) return;
-          draggingRef.current = false;
-          commit(position);
-        }}
-        onKeyUp={() => {
-          if (!draggingRef.current) return;
-          draggingRef.current = false;
-          commit(position);
-        }}
-        className="h-1 min-w-0 flex-1 cursor-pointer accent-pink-600 disabled:cursor-default disabled:opacity-40"
-        title="Drag to set the song start time (relative to where the music begins)"
-      />
+      {/* Scrollable viewport; the inner track is `zoom`× as wide for precision. */}
+      <div ref={scrollRef} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+      {/* Two-handle track: a draggable start marker + a playhead. */}
+      <div
+        ref={trackRef}
+        onPointerDown={onTrackPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        className={`relative h-12 touch-none ${duration ? 'cursor-pointer' : 'opacity-40'}`}
+        style={{ width: `${zoom * 100}%` }}
+      >
+        {/* waveform (behind everything) */}
+        {wavePath && peaks.length > 1 ? (
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full text-gray-600"
+            viewBox={`0 0 ${Math.max(1, peaks.length - 1)} 2`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path d={wavePath} fill="currentColor" />
+          </svg>
+        ) : (
+          // base rail while the waveform isn't ready yet
+          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
+        )}
+        {/* active region from the marker to the end (what plays/exports) */}
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 bg-pink-500/15"
+          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
+        />
+        {/* playhead (preview position) — full-height line; track handles its drag */}
+        <div
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Playback position"
+          aria-valuemin={markerRel}
+          aria-valuemax={duration}
+          aria-valuenow={playRel}
+          onKeyDown={onPlayheadKeyDown}
+          className="pointer-events-none absolute inset-y-0 z-20 w-px -translate-x-1/2 bg-white/70 focus:outline-none"
+          style={{ left: `${timeToPercent(playRel, duration)}%`, transition: playheadGlide }}
+        >
+          <div className="absolute top-1/2 left-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40" />
+        </div>
+        {/* start marker (in-point) — draggable, full-height so it stays visible
+            even when the playhead sits on top of it */}
+        <div
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Song start time"
+          aria-valuemin={0}
+          aria-valuemax={duration}
+          aria-valuenow={markerRel}
+          onPointerDown={onMarkerPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onKeyDown={onMarkerKeyDown}
+          onKeyUp={onMarkerKeyUp}
+          title="Drag to set the song start time"
+          className="absolute inset-y-0 z-30 flex w-3 -translate-x-1/2 cursor-ew-resize touch-none justify-center focus:outline-none"
+          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
+        >
+          <div className="h-full w-0.5 bg-pink-500" />
+          <div className="absolute -top-px h-1.5 w-1.5 rotate-45 bg-pink-500" />
+        </div>
+      </div>
+      </div>
 
-      <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
-        {formatTime(position)}
+      <span className="w-14 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
+        {formatTime(playRel)}
       </span>
+
+      {/* Zoom controls — more pixels per second for precise placement. */}
+      <div className="flex shrink-0 items-center gap-0.5 text-gray-400">
+        <button
+          onClick={() => setZoom((z) => Math.max(1, z / 2))}
+          disabled={!duration || zoom <= 1}
+          className="rounded px-1 text-sm leading-none hover:bg-gray-700 hover:text-white disabled:opacity-30"
+          title="Zoom out"
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <span className="w-6 text-center text-[10px] tabular-nums">{zoom}×</span>
+        <button
+          onClick={() => setZoom((z) => Math.min(8, z * 2))}
+          disabled={!duration || zoom >= 8}
+          className="rounded px-1 text-sm leading-none hover:bg-gray-700 hover:text-white disabled:opacity-30"
+          title="Zoom in"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 }
@@ -393,8 +662,15 @@ function SortableRow({
   // offsets (the exporter consumes them) but shown relative to the music onset,
   // so the blank space at the top of the file is skipped in the UI.
   const [scrubberRef, inView] = useInView<HTMLDivElement>();
-  const { leadIn, duration, failed } = useAudioAnalysis(song?.wikiAudioUrl, inView);
+  const { leadIn, duration, failed, blobUrl, peaks } = useAudioAnalysis(
+    song?.wikiAudioUrl,
+    inView,
+  );
   const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
+  // Live marker position while it's being dragged, so the displayed start time
+  // tracks the scrub in realtime; the actual commit still happens on release.
+  const [liveStartRel, setLiveStartRel] = useState<number | null>(null);
+  const shownStartRel = liveStartRel ?? relStart;
 
   return (
     <div
@@ -449,9 +725,12 @@ function SortableRow({
 
         {song && (
           <TimeInput
-            value={relStart}
+            value={shownStartRel}
             onChange={(t) =>
-              onUpdateStartTime(entry.id, t == null ? null : t + leadIn)
+              onUpdateStartTime(
+                entry.id,
+                t == null ? null : Math.round((t + leadIn) * 1000) / 1000,
+              )
             }
           />
         )}
@@ -474,11 +753,14 @@ function SortableRow({
       {song?.wikiAudioUrl && (
         <div ref={scrubberRef} className="pl-8 pr-6 sm:pl-12">
           <AudioScrubber
-            src={song.wikiAudioUrl}
+            key={entry.songId}
+            src={blobUrl}
             startTime={entry.songStartTime}
             leadIn={leadIn}
             duration={duration}
+            peaks={peaks}
             failed={failed}
+            onScrub={setLiveStartRel}
             onCommit={(t) => onUpdateStartTime(entry.id, t)}
           />
         </div>
@@ -513,7 +795,7 @@ export function EntryList({
   };
 
   return (
-    <div className="w-full max-w-2xl">
+    <div className="w-full max-w-4xl">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
