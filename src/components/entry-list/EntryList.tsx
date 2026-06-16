@@ -218,7 +218,6 @@ function AudioScrubber({
   startTime,
   leadIn,
   duration: decodedDuration,
-  clipLength,
   failed,
   onCommit,
   onScrub,
@@ -228,9 +227,6 @@ function AudioScrubber({
   startTime: number | null;
   leadIn: number;
   duration: number;
-  // Length of the attached reaction clip in seconds, or null when no clip is
-  // set. Drives the end marker — the song plays under the clip for this long.
-  clipLength: number | null;
   failed: boolean;
   onCommit: (t: number) => void;
   // Live (uncommitted) marker position in onset-relative seconds while dragging,
@@ -252,12 +248,6 @@ function AudioScrubber({
   // start. Lets the marker move live before the commit on release.
   const [markerDrag, setMarkerDrag] = useState<number | null>(null);
   const markerRel = clamp(markerDrag ?? startRel, 0, duration || (markerDrag ?? startRel));
-
-  // End marker: a fixed clip-length ahead of the start (the slice of the song
-  // that actually plays under the clip). Tracks the start marker; not separately
-  // draggable. null when no clip is attached.
-  const endRel =
-    clipLength != null && duration ? clamp(markerRel + clipLength, markerRel, duration) : null;
 
   const [playRel, setPlayRel] = useState(startRel);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -498,13 +488,10 @@ function AudioScrubber({
       >
         {/* base rail */}
         <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
-        {/* used region — [start, end] when a clip sets the end, else to the end */}
+        {/* active region from the marker to the end (what plays/exports) */}
         <div
-          className="absolute top-1/2 h-1 -translate-y-1/2 bg-pink-600/50"
-          style={{
-            left: `${timeToPercent(markerRel, duration)}%`,
-            width: `${timeToPercent((endRel ?? duration) - markerRel, duration)}%`,
-          }}
+          className="absolute top-1/2 right-0 h-1 -translate-y-1/2 rounded-r-full bg-pink-600/50"
+          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
         />
         {/* playhead (preview position) — visual; the track handles its drag */}
         <div
@@ -518,14 +505,6 @@ function AudioScrubber({
           className="pointer-events-none absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
           style={{ left: `${timeToPercent(playRel, duration)}%`, transition: playheadGlide }}
         />
-        {/* end marker (out-point) — derived from clip length; not draggable */}
-        {endRel != null && (
-          <div
-            className="pointer-events-none absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-pink-400/70"
-            style={{ left: `${timeToPercent(endRel, duration)}%` }}
-            title="Clip end"
-          />
-        )}
         {/* start marker (in-point) — draggable, full-height so it stays visible
             even when the playhead sits on top of it */}
         <div
@@ -726,7 +705,6 @@ function SortableRow({
             startTime={entry.songStartTime}
             leadIn={leadIn}
             duration={duration}
-            clipLength={clip ? clip.durationMs / 1000 : null}
             failed={failed}
             onScrub={setLiveStartRel}
             onCommit={(t) => onUpdateStartTime(entry.id, t)}
