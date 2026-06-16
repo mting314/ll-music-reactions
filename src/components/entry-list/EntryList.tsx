@@ -274,6 +274,8 @@ function AudioScrubber({
   // horizontally — more pixels per second means finer marker/playhead placement.
   const [zoom, setZoom] = useState(1);
   const dragging = useRef<null | 'marker' | 'playhead'>(null);
+  // Whether playback was running when a scrub started, so we can resume on release.
+  const wasPlaying = useRef(false);
 
   // During playback the playhead only advances on `timeupdate` (~4Hz), which
   // looks steppy — glide it with a CSS transition that bridges the gap between
@@ -344,11 +346,18 @@ function AudioScrubber({
 
   // Pointerdown on the track background (or the playhead thumb) scrubs the
   // playhead — clamped so it can never land before the marker.
+  // Pause playback for the duration of a scrub; remember to resume on release.
+  const beginScrub = () => {
+    setIsScrubbing(true);
+    wasPlaying.current = isPlaying;
+    if (isPlaying) audioRef.current?.pause();
+  };
+
   const onTrackPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (!duration) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragging.current = 'playhead';
-    setIsScrubbing(true);
+    beginScrub();
     // Move the handle but don't seek yet — a click or drag seeks once on release.
     setPlayRel(clamp(timeAt(e.clientX), markerRel, duration));
   };
@@ -360,7 +369,7 @@ function AudioScrubber({
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragging.current = 'marker';
-    setIsScrubbing(true);
+    beginScrub();
     // Start from the marker's current position — don't jump (or commit) to the
     // click X, so a bare click doesn't nudge a carefully-set start time. The
     // value only changes once the pointer actually moves.
@@ -405,6 +414,11 @@ function AudioScrubber({
       // Seek to the chosen playhead only now, on release — so scrubbing doesn't
       // restart playback on every move.
       seek(playRel);
+    }
+    // Resume playback if the scrub interrupted it (pause-while-scrubbing).
+    if (wasPlaying.current) {
+      wasPlaying.current = false;
+      audioRef.current?.play().catch(() => {});
     }
   };
 
@@ -777,7 +791,7 @@ export function EntryList({
   };
 
   return (
-    <div className="w-full max-w-2xl">
+    <div className="w-full max-w-4xl">
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

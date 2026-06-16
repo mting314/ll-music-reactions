@@ -143,7 +143,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="w-full max-w-2xl">
+            <div className="w-full max-w-4xl">
               <EntryList
                 entries={timeline.entries}
                 songMap={songMap}
