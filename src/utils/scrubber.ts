@@ -30,3 +30,23 @@ export function timeToPercent(time: number, duration: number): number {
   if (duration <= 0) return 0;
   return clamp(time / duration, 0, 1) * 100;
 }
+
+/**
+ * Build an SVG path (a filled, vertically-mirrored envelope) for a normalized
+ * peaks array, in a `0 0 (n-1) 2` viewBox centered on y=1. Rendered with
+ * preserveAspectRatio="none" so it stretches to the track's width/height.
+ * Returns '' for empty input.
+ */
+export function waveformPath(peaks: number[]): string {
+  const n = peaks.length;
+  if (n === 0) return '';
+  let top = '';
+  let bottom = '';
+  for (let i = 0; i < n; i++) {
+    const p = clamp(peaks[i]!, 0, 1);
+    top += `${i === 0 ? 'M' : 'L'}${i},${(1 - p).toFixed(3)}`;
+    const j = n - 1 - i; // walk back for the mirrored bottom edge
+    bottom += `L${j},${(1 + clamp(peaks[j]!, 0, 1)).toFixed(3)}`;
+  }
+  return `${top}${bottom}Z`;
+}

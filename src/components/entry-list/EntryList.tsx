@@ -2,6 +2,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useMemo,
   type PointerEvent as RPointerEvent,
   type KeyboardEvent as RKeyboardEvent,
 } from 'react';
@@ -20,8 +21,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getAlbumArtUrl } from '@/hooks/useData';
-import { detectLeadIn } from '@/utils/audio';
-import { clamp, positionToTime, timeToPercent } from '@/utils/scrubber';
+import { detectLeadIn, computePeaks } from '@/utils/audio';
+import { clamp, positionToTime, timeToPercent, waveformPath } from '@/utils/scrubber';
 import { formatTime, parseTime } from '@/utils/time';
 import type { TimelineEntry, Song, Discography, ReactionClip } from '@/types';
 
@@ -68,7 +69,13 @@ interface AudioAnalysis {
   // Object URL for the downloaded audio, reused for playback so the file is
   // fetched once (decode + <audio> share it) instead of downloaded twice.
   blobUrl: string | null;
+  // Normalized waveform peaks (post-lead-in), for drawing the timeline.
+  peaks: number[];
 }
+
+// Waveform resolution — peaks per song. ~enough detail at the 8× max zoom
+// without bloating the cached path string.
+const WAVE_BUCKETS = 500;
 
 // A single shared AudioContext for ALL decodes. Browsers hard-cap the number of
 // AudioContexts (~6 in Chrome) and throw once exceeded — creating one per row
@@ -91,6 +98,7 @@ const PENDING_ANALYSIS: AudioAnalysis = {
   duration: 0,
   failed: false,
   blobUrl: null,
+  peaks: [],
 };
 
 // Decoded results are cached by URL (module scope) so a song is only ever
@@ -123,14 +131,17 @@ function analyzeAudio(src: string): Promise<AudioAnalysis> {
       const ctx = getAudioCtx();
       if (!ctx) throw new Error('no AudioContext');
       const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+      const channel = buf.getChannelData(0);
+      const leadIn = detectLeadIn(channel, buf.sampleRate);
       return {
-        leadIn: detectLeadIn(buf.getChannelData(0), buf.sampleRate),
+        leadIn,
         duration: buf.duration,
         failed: false,
         blobUrl: URL.createObjectURL(blob),
+        peaks: computePeaks(channel, Math.floor(leadIn * buf.sampleRate), WAVE_BUCKETS),
       };
     } catch {
-      return { leadIn: 0, duration: 0, failed: true, blobUrl: null };
+      return { leadIn: 0, duration: 0, failed: true, blobUrl: null, peaks: [] };
     }
   })()
     .then((a) => {
@@ -218,6 +229,7 @@ function AudioScrubber({
   startTime,
   leadIn,
   duration: decodedDuration,
+  peaks,
   failed,
   onCommit,
   onScrub,
@@ -227,6 +239,8 @@ function AudioScrubber({
   startTime: number | null;
   leadIn: number;
   duration: number;
+  // Normalized waveform peaks for the timeline; empty until decoded.
+  peaks: number[];
   failed: boolean;
   onCommit: (t: number) => void;
   // Live (uncommitted) marker position in onset-relative seconds while dragging,
@@ -242,6 +256,10 @@ function AudioScrubber({
   // Audible length, relative to the music onset. Sourced from the decoded
   // buffer — the <audio> element reports Infinity for Ogg until fully buffered.
   const duration = Math.max(0, decodedDuration - leadIn);
+
+  // Waveform path is derived purely from the (stable, cached) peaks — memoize so
+  // it isn't rebuilt on every drag/playback render.
+  const wavePath = useMemo(() => waveformPath(peaks), [peaks]);
 
   const startRel = toRel(startTime ?? leadIn);
   // Local marker position while it's being dragged; null = reflect the committed
@@ -483,17 +501,29 @@ function AudioScrubber({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
-        className={`relative h-6 touch-none ${duration ? 'cursor-pointer' : 'opacity-40'}`}
+        className={`relative h-12 touch-none ${duration ? 'cursor-pointer' : 'opacity-40'}`}
         style={{ width: `${zoom * 100}%` }}
       >
-        {/* base rail */}
-        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
+        {/* waveform (behind everything) */}
+        {wavePath ? (
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full text-gray-600"
+            viewBox={`0 0 ${Math.max(1, peaks.length - 1)} 2`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <path d={wavePath} fill="currentColor" />
+          </svg>
+        ) : (
+          // base rail while the waveform isn't ready yet
+          <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
+        )}
         {/* active region from the marker to the end (what plays/exports) */}
         <div
-          className="absolute top-1/2 right-0 h-1 -translate-y-1/2 rounded-r-full bg-pink-600/50"
+          className="pointer-events-none absolute inset-y-0 right-0 bg-pink-500/15"
           style={{ left: `${timeToPercent(markerRel, duration)}%` }}
         />
-        {/* playhead (preview position) — visual; the track handles its drag */}
+        {/* playhead (preview position) — full-height line; track handles its drag */}
         <div
           role="slider"
           tabIndex={duration ? 0 : -1}
@@ -502,9 +532,11 @@ function AudioScrubber({
           aria-valuemax={duration}
           aria-valuenow={playRel}
           onKeyDown={onPlayheadKeyDown}
-          className="pointer-events-none absolute top-1/2 z-20 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
+          className="pointer-events-none absolute inset-y-0 z-20 w-px -translate-x-1/2 bg-white/70 focus:outline-none"
           style={{ left: `${timeToPercent(playRel, duration)}%`, transition: playheadGlide }}
-        />
+        >
+          <div className="absolute top-1/2 left-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40" />
+        </div>
         {/* start marker (in-point) — draggable, full-height so it stays visible
             even when the playhead sits on top of it */}
         <div
@@ -613,7 +645,10 @@ function SortableRow({
   // offsets (the exporter consumes them) but shown relative to the music onset,
   // so the blank space at the top of the file is skipped in the UI.
   const [scrubberRef, inView] = useInView<HTMLDivElement>();
-  const { leadIn, duration, failed, blobUrl } = useAudioAnalysis(song?.wikiAudioUrl, inView);
+  const { leadIn, duration, failed, blobUrl, peaks } = useAudioAnalysis(
+    song?.wikiAudioUrl,
+    inView,
+  );
   const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
   // Live marker position while it's being dragged, so the displayed start time
   // tracks the scrub in realtime; the actual commit still happens on release.
@@ -705,6 +740,7 @@ function SortableRow({
             startTime={entry.songStartTime}
             leadIn={leadIn}
             duration={duration}
+            peaks={peaks}
             failed={failed}
             onScrub={setLiveStartRel}
             onCommit={(t) => onUpdateStartTime(entry.id, t)}

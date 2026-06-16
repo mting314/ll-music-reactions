@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { clamp, positionToTime, timeToPercent } from './scrubber';
+import { clamp, positionToTime, timeToPercent, waveformPath } from './scrubber';
 
 test('clamp keeps values within range', () => {
   expect(clamp(5, 0, 10)).toBe(5);
@@ -35,6 +35,19 @@ test('timeToPercent positions a handle as a percentage', () => {
   expect(timeToPercent(60, 60)).toBe(100);
   expect(timeToPercent(90, 60)).toBe(100); // clamped
   expect(timeToPercent(10, 0)).toBe(0); // no duration yet
+});
+
+test('waveformPath builds a closed mirrored envelope', () => {
+  const d = waveformPath([0, 1, 0.5]);
+  expect(d.startsWith('M0,1.000')).toBe(true); // first top point at peak 0
+  expect(d).toContain('L1,0.000'); // peak 1 → top edge y=0
+  expect(d.endsWith('Z')).toBe(true); // closed path
+  // mirrored bottom edge includes the peak-1 point at y=2
+  expect(d).toContain('L1,2.000');
+});
+
+test('waveformPath returns empty string for no peaks', () => {
+  expect(waveformPath([])).toBe('');
 });
 
 test('playhead can never precede the start marker (clamp lower bound)', () => {
