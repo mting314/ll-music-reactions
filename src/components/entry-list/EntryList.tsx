@@ -1,4 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import {
+  useState,
+  useRef,
+  useEffect,
+  type PointerEvent as RPointerEvent,
+  type KeyboardEvent as RKeyboardEvent,
+} from 'react';
 import {
   DndContext,
   closestCenter,
@@ -15,6 +21,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { getAlbumArtUrl } from '@/hooks/useData';
 import { detectLeadIn } from '@/utils/audio';
+import { clamp, positionToTime, timeToPercent } from '@/utils/scrubber';
 import type { TimelineEntry, Song, Discography, ReactionClip } from '@/types';
 
 function formatTime(seconds: number): string {
@@ -198,14 +205,18 @@ function useInView<T extends Element>() {
 }
 
 /**
- * A mini audio player + scrubber. The slider's resting position IS the song's
- * start timestamp: drag it (or play and pause at the right spot) to set where
- * the song begins in the exported video.
+ * A two-handle audio scrubber, like a video editor's timeline:
  *
- * All positions here are **relative to the music onset** (`leadIn`): the slider
- * shows time-since-sound-start, while `startTime`/`onCommit` are absolute file
- * offsets (what the exporter consumes). leadIn bridges the two so the leading
- * silence is skipped from the user's point of view.
+ *  - a **start marker** (the in-point) = the song's start timestamp. Drag it to
+ *    set where the song begins in the export; it is the ONLY control that
+ *    commits a value.
+ *  - a **playhead** that follows playback and can be scrubbed for preview, but
+ *    is constrained to never sit before the marker and never commits anything.
+ *
+ * All positions are **relative to the music onset** (`leadIn`): the track shows
+ * time-since-sound-start, while `startTime`/`onCommit` are absolute file offsets
+ * (what the exporter consumes). leadIn bridges the two so the leading silence is
+ * skipped from the user's point of view.
  */
 function AudioScrubber({
   src,
@@ -223,24 +234,34 @@ function AudioScrubber({
   onCommit: (t: number) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
   const toRel = (abs: number) => Math.max(0, abs - leadIn);
-  const [position, setPosition] = useState(toRel(startTime ?? leadIn));
-  const [isPlaying, setIsPlaying] = useState(false);
-  const draggingRef = useRef(false);
 
   // Audible length, relative to the music onset. Sourced from the decoded
   // buffer — the <audio> element reports Infinity for Ogg until fully buffered.
   const duration = Math.max(0, decodedDuration - leadIn);
 
-  // Follow external start-time / lead-in changes (typed in the text box, or the
-  // lead-in finishing decode) while the user isn't scrubbing or listening.
+  const startRel = toRel(startTime ?? leadIn);
+  // Local marker position while it's being dragged; null = reflect the committed
+  // start. Lets the marker move live before the commit on release.
+  const [markerDrag, setMarkerDrag] = useState<number | null>(null);
+  const markerRel = clamp(markerDrag ?? startRel, 0, duration || (markerDrag ?? startRel));
+
+  const [playRel, setPlayRel] = useState(startRel);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const dragging = useRef<null | 'marker' | 'playhead'>(null);
+
+  // Keep the playhead within [marker, end] as the start/length change (marker
+  // moved past the playhead, or decode resolving the duration). Skip while
+  // dragging so we don't fight the pointer.
   useEffect(() => {
-    if (!draggingRef.current && !isPlaying) setPosition(toRel(startTime ?? leadIn));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startTime, leadIn, isPlaying]);
+    if (dragging.current) return;
+    setPlayRel((p) => clamp(p, startRel, duration || startRel));
+  }, [startRel, duration]);
 
   // Commit an absolute file offset, rounded to 0.1s (stable against float noise).
-  const commit = (rel: number) => onCommit(Math.round((leadIn + rel) * 10) / 10);
+  const commit = (rel: number) =>
+    onCommit(Math.round((leadIn + clamp(rel, 0, duration || rel)) * 10) / 10);
 
   const seek = (rel: number) => {
     if (audioRef.current) audioRef.current.currentTime = leadIn + rel;
@@ -251,10 +272,104 @@ function AudioScrubber({
     if (!audio) return;
     if (isPlaying) {
       audio.pause();
-    } else {
-      audio.currentTime = leadIn + position;
-      audio.play().catch(() => {});
+      return;
     }
+    // Play from the playhead; if it's parked at (or ~at) the end, restart from
+    // the marker. The epsilon covers timeupdate landing just shy of duration.
+    const from = playRel < duration - 0.1 ? playRel : markerRel;
+    setPlayRel(from);
+    audio.currentTime = leadIn + from;
+    audio.play().catch(() => {});
+  };
+
+  // ── pointer dragging ──────────────────────────────────────────────────────
+  const timeAt = (clientX: number) => {
+    const r = trackRef.current?.getBoundingClientRect();
+    return r ? positionToTime(clientX, r.left, r.width, duration) : 0;
+  };
+
+  // Pointerdown on the track background (or the playhead thumb) scrubs the
+  // playhead — clamped so it can never land before the marker.
+  const onTrackPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragging.current = 'playhead';
+    const t = clamp(timeAt(e.clientX), markerRel, duration);
+    setPlayRel(t);
+    seek(t);
+  };
+
+  // Pointerdown on the marker handle drags the start point (stops propagation so
+  // it doesn't also scrub the playhead).
+  const onMarkerPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragging.current = 'marker';
+    // Start from the marker's current position — don't jump (or commit) to the
+    // click X, so a bare click doesn't nudge a carefully-set start time. The
+    // value only changes once the pointer actually moves.
+    setMarkerDrag(markerRel);
+  };
+
+  // Keep audio at/after the marker so playback never sounds before the in-point.
+  const keepAudioAtLeast = (rel: number) => {
+    const audio = audioRef.current;
+    if (audio && audio.currentTime < leadIn + rel) audio.currentTime = leadIn + rel;
+  };
+
+  const onPointerMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const t = timeAt(e.clientX);
+    if (dragging.current === 'marker') {
+      const m = clamp(t, 0, duration);
+      setMarkerDrag(m);
+      setPlayRel((p) => Math.max(p, m)); // playhead can't precede the marker
+      keepAudioAtLeast(m); // and neither can in-flight playback
+    } else {
+      const ph = clamp(t, markerRel, duration);
+      setPlayRel(ph);
+      seek(ph);
+    }
+  };
+
+  const onPointerEnd = (e: RPointerEvent<HTMLDivElement>) => {
+    const which = dragging.current;
+    if (!which) return;
+    dragging.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (which === 'marker' && markerDrag != null) {
+      if (markerDrag !== startRel) commit(markerDrag); // skip no-op (bare click)
+      setMarkerDrag(null);
+    }
+  };
+
+  // ── keyboard (arrow keys nudge by 1s) ─────────────────────────────────────
+  const STEP = 1;
+  const arrowDelta = (key: string) =>
+    key === 'ArrowLeft' ? -STEP : key === 'ArrowRight' ? STEP : 0;
+
+  const onMarkerKeyDown = (e: RKeyboardEvent) => {
+    const d = arrowDelta(e.key);
+    if (!d || !duration) return;
+    e.preventDefault();
+    const m = clamp((markerDrag ?? startRel) + d, 0, duration);
+    setMarkerDrag(m);
+    setPlayRel((p) => Math.max(p, m));
+    keepAudioAtLeast(m);
+  };
+  const onMarkerKeyUp = (e: RKeyboardEvent) => {
+    if (!arrowDelta(e.key) || markerDrag == null) return;
+    commit(markerDrag);
+    setMarkerDrag(null);
+  };
+  const onPlayheadKeyDown = (e: RKeyboardEvent) => {
+    const d = arrowDelta(e.key);
+    if (!d || !duration) return;
+    e.preventDefault();
+    const ph = clamp(playRel + d, markerRel, duration);
+    setPlayRel(ph);
+    seek(ph);
   };
 
   // The audio file is missing/undecodable (e.g. a stale 404 wikiAudioUrl, or an
@@ -293,48 +408,76 @@ function AudioScrubber({
         }}
         onEnded={() => setIsPlaying(false)}
         onTimeUpdate={(e) => {
-          if (!draggingRef.current) setPosition(toRel(e.currentTarget.currentTime));
+          if (dragging.current) return;
+          setPlayRel(clamp(toRel(e.currentTarget.currentTime), markerRel, duration || markerRel));
         }}
       />
 
       <button
         onClick={togglePlay}
-        className="shrink-0 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-        title={isPlaying ? 'Pause' : 'Play from start time'}
+        disabled={!duration}
+        className="shrink-0 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-40"
+        title={isPlaying ? 'Pause' : 'Play from the playhead'}
         aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? '❚❚' : '►'}
       </button>
 
-      <input
-        type="range"
-        min={0}
-        max={duration}
-        step={0.1}
-        value={Math.min(position, duration)}
-        disabled={!duration}
-        onChange={(e) => {
-          const rel = parseFloat(e.target.value);
-          draggingRef.current = true;
-          setPosition(rel);
-          seek(rel);
-        }}
-        onPointerUp={() => {
-          if (!draggingRef.current) return;
-          draggingRef.current = false;
-          commit(position);
-        }}
-        onKeyUp={() => {
-          if (!draggingRef.current) return;
-          draggingRef.current = false;
-          commit(position);
-        }}
-        className="h-1 min-w-0 flex-1 cursor-pointer accent-pink-600 disabled:cursor-default disabled:opacity-40"
-        title="Drag to set the song start time (relative to where the music begins)"
-      />
+      {/* Two-handle track: a draggable start marker + a playhead. */}
+      <div
+        ref={trackRef}
+        onPointerDown={onTrackPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+        className={`relative h-6 min-w-0 flex-1 touch-none ${
+          duration ? 'cursor-pointer' : 'opacity-40'
+        }`}
+      >
+        {/* base rail */}
+        <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-gray-700" />
+        {/* active region from the marker to the end (what actually plays/exports) */}
+        <div
+          className="absolute top-1/2 right-0 h-1 -translate-y-1/2 rounded-r-full bg-pink-600/50"
+          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
+        />
+        {/* playhead (preview position) — visual; the track handles its drag */}
+        <div
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Playback position"
+          aria-valuemin={markerRel}
+          aria-valuemax={duration}
+          aria-valuenow={playRel}
+          onKeyDown={onPlayheadKeyDown}
+          className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/40 focus:outline-none focus:ring-2 focus:ring-pink-400"
+          style={{ left: `${timeToPercent(playRel, duration)}%` }}
+        />
+        {/* start marker (in-point) — draggable, sits on top */}
+        <div
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Song start time"
+          aria-valuemin={0}
+          aria-valuemax={duration}
+          aria-valuenow={markerRel}
+          onPointerDown={onMarkerPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onKeyDown={onMarkerKeyDown}
+          onKeyUp={onMarkerKeyUp}
+          title="Drag to set the song start time"
+          className="absolute top-0 bottom-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none focus:outline-none"
+          style={{ left: `${timeToPercent(markerRel, duration)}%` }}
+        >
+          <div className="mx-auto h-full w-0.5 bg-pink-500" />
+          <div className="absolute -top-px left-1/2 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-pink-500" />
+        </div>
+      </div>
 
       <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-gray-500">
-        {formatTime(position)}
+        {formatTime(playRel)}
       </span>
     </div>
   );
