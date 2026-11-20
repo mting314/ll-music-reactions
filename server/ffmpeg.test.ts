@@ -12,11 +12,11 @@ import {
 } from "./ffmpeg";
 
 describe("resolutionScale", () => {
-  test("720p maps to 1280:720", () => {
-    expect(resolutionScale("720p")).toBe("1280:720");
+  test("720p maps to 720:720 (1:1 square)", () => {
+    expect(resolutionScale("720p")).toBe("720:720");
   });
-  test("480p maps to 854:480", () => {
-    expect(resolutionScale("480p")).toBe("854:480");
+  test("480p maps to 480:480 (1:1 square)", () => {
+    expect(resolutionScale("480p")).toBe("480:480");
   });
 });
 
@@ -64,7 +64,7 @@ function entry(overrides: Partial<ExportRequest["entries"][0]> = {}) {
 }
 
 describe("buildFilterComplex", () => {
-  test("single entry with art + audio wires overlay, atrim, amix, and concat", () => {
+  test("single entry with art + audio wires cover-crop, overlay, atrim, amix, and concat", () => {
     const req: ExportRequest = {
       entries: [entry()],
       resolution: "720p",
@@ -74,8 +74,9 @@ describe("buildFilterComplex", () => {
     const filter = buildFilterComplex(req, inputMap);
 
     expect(filter).toContain(
-      "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:-1:-1:color=black,setsar=1[scaled0]",
+      "[0:v]scale=720:720:force_original_aspect_ratio=increase,crop=720:720,setsar=1[scaled0]",
     );
+    expect(filter).not.toContain("pad=");
     expect(filter).toContain("[1:v]scale=180:180[artscaled0]");
     expect(filter).toContain(
       "[scaled0][artscaled0]overlay=W-180-20:20[v0]",
@@ -84,14 +85,26 @@ describe("buildFilterComplex", () => {
     expect(filter).toContain(
       "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[clipa0]",
     );
-    // songStartTime=30 -> trim 30:33 (3s window), then normalized
+    // songStartTime=30 -> trim 30:35 (5s headroom >= 3.6s clip), then normalized
     expect(filter).toContain(
-      "[2:a]atrim=30:33,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[songtrim0]",
+      "[2:a]atrim=30:35,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[songtrim0]",
     );
     expect(filter).toContain(
       "[clipa0][songtrim0]amix=inputs=2:duration=shortest,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0]",
     );
     expect(filter).toContain("[v0][a0]concat=n=1:v=1:a=1[outv][outa]");
+  });
+
+  test("longer clip durationMs expands the atrim headroom past 5s", () => {
+    const req: ExportRequest = {
+      entries: [entry({ songStartTime: 20, durationMs: 6500 })],
+      resolution: "720p",
+      overlayPosition: "top-right",
+    };
+    const inputMap: InputMap[] = [{ clipIdx: 0, artIdx: 1, audioIdx: 2 }];
+    const filter = buildFilterComplex(req, inputMap);
+
+    expect(filter).toContain("[2:a]atrim=20:28,asetpts=PTS-STARTPTS");
   });
 
   test("entry without art uses copy passthrough instead of overlay", () => {
@@ -105,7 +118,7 @@ describe("buildFilterComplex", () => {
 
     expect(filter).toContain("[scaled0]copy[v0]");
     expect(filter).not.toContain("overlay=");
-    expect(filter).toContain("scale=854:480");
+    expect(filter).toContain("scale=480:480");
   });
 
   test("entry without audio concats the clip's own audio stream", () => {
@@ -141,9 +154,9 @@ describe("buildFilterComplex", () => {
     ];
     const filter = buildFilterComplex(req, inputMap);
 
-    expect(filter).toContain("[3:v]scale=1280:720");
+    expect(filter).toContain("[3:v]scale=720:720");
     expect(filter).toContain("[4:v]scale=180:180[artscaled1]");
-    expect(filter).toContain("[5:a]atrim=10:13");
+    expect(filter).toContain("[5:a]atrim=10:15");
     expect(filter).toContain(
       "[v0][a0][v1][a1]concat=n=2:v=1:a=1[outv][outa]",
     );
@@ -167,6 +180,8 @@ describe("buildFfmpegArgs", () => {
     expect(args).toContain("-filter_complex");
     expect(args).toContain("[0:v]copy[outv]");
     expect(args).toContain("libx264");
+    expect(args).toContain("-pix_fmt");
+    expect(args).toContain("yuv420p");
     expect(args).toContain("aac");
     expect(args).toContain("+faststart");
     expect(args[args.length - 1]).toBe("/tmp/out.mp4");

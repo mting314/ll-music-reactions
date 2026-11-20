@@ -125,7 +125,13 @@ export function PreviewPlayer({
     }
   }, [isPlaying]);
 
-  const handlePlay = () => {
+  const handleTogglePlay = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      videoRef.current?.pause();
+      audioRef.current?.pause();
+      return;
+    }
     setIsPlaying(true);
     videoRef.current?.play().catch(() => {});
     if (audioRef.current) {
@@ -170,13 +176,15 @@ export function PreviewPlayer({
           &times; Close
         </button>
 
-        <div className="relative aspect-[9/16] max-h-[70vh] overflow-hidden rounded-xl bg-black mx-auto">
+        {/* 1:1 square matches the 720x720 / 480x480 export canvas so the album
+            art sits directly over the video corner, matching the exported MP4. */}
+        <div className="relative aspect-square max-h-[70vh] overflow-hidden rounded-xl bg-black mx-auto">
           {currentClip && (
             <video
               ref={videoRef}
               key={currentClip.id + '-' + currentIndex}
               src={getClipUrl(currentClip)}
-              className="h-full w-full object-contain"
+              className="h-full w-full object-cover"
               onEnded={playNext}
             />
           )}
@@ -192,11 +200,11 @@ export function PreviewPlayer({
           )}
 
           {currentArtUrl && (
-            <div className="absolute right-3 top-3">
+            <div className="absolute right-[2.8%] top-[2.8%] w-1/4">
               <img
                 src={currentArtUrl}
                 alt=""
-                className="h-64 w-64 rounded-lg shadow-lg border border-white/20"
+                className="aspect-square w-full rounded-lg shadow-lg border border-white/20 object-cover"
                 crossOrigin="anonymous"
                 referrerPolicy="no-referrer"
               />
@@ -225,10 +233,10 @@ export function PreviewPlayer({
           </button>
 
           <button
-            onClick={handlePlay}
+            onClick={handleTogglePlay}
             className="rounded-full bg-pink-600 px-6 py-2 text-sm font-medium text-white hover:bg-pink-500"
           >
-            {isPlaying ? 'Playing' : 'Play'}
+            {isPlaying ? 'Pause' : 'Play'}
           </button>
 
           <button
