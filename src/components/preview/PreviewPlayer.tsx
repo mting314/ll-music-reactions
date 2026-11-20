@@ -211,7 +211,7 @@ export function PreviewPlayer({
                 />
               )}
               {currentSong && (
-                <p className="line-clamp-2 max-w-full rounded bg-black/60 px-1.5 py-0.5 text-center text-xs font-semibold leading-tight text-white drop-shadow">
+                <p className="line-clamp-2 max-w-full text-balance rounded bg-black/60 px-1.5 py-0.5 text-center text-xs font-semibold leading-tight text-white drop-shadow">
                   {currentSong.name}
                 </p>
               )}

@@ -73,39 +73,73 @@ function visualWidth(s: string): number {
 }
 
 /**
- * Wrap a song title onto at most 2 compact lines sized to sit neatly beneath
- * the square album art, breaking on whitespace when available and truncating
- * with an ellipsis if even 2 lines exceed the visual width budget.
+ * Wrap a song title onto at most 2 balanced lines sized to sit neatly beneath
+ * the square album art (180px @ 720p ≈ 11 CJK chars = 22 visual units).
+ * Splits near the visual midpoint (preferring spaces) so titles never leave a
+ * lone hanging orphan character on line 2, and truncates with "…" if even 2
+ * full lines exceed the budget.
  */
 export function formatSongLabel(
   songName: string,
-  maxLineWidth: number = 18,
+  maxLineWidth: number = 22,
 ): string {
   const clean = songName.trim().replace(/\s+/g, " ");
   if (!clean) return "";
-  if (visualWidth(clean) <= maxLineWidth) return clean;
+  const total = visualWidth(clean);
+  if (total <= maxLineWidth) return clean;
 
   const chars = Array.from(clean);
-  // Find the split index for line 1 within maxLineWidth, preferring a space.
-  let w = 0;
-  let splitIdx = 0;
-  let lastSpace = -1;
+  // Cumulative visual width after each character
+  const cumWidth: number[] = [];
+  let acc = 0;
+  for (const ch of chars) {
+    acc += charWidth(ch);
+    cumWidth.push(acc);
+  }
+
+  // If the whole title fits in 2 lines, balance around total / 2 so we never
+  // get a 1-character orphan on line 2. Otherwise fill line 1 up to maxLineWidth.
+  const target = total <= maxLineWidth * 2 ? total / 2 : maxLineWidth;
+
+  // Prefer splitting at a space close to `target` (provided line 1 <= maxLineWidth)
+  let bestSpace = -1;
+  let bestSpaceDist = Infinity;
   for (let i = 0; i < chars.length; i++) {
-    const cw = charWidth(chars[i]!);
-    if (w + cw > maxLineWidth) break;
-    w += cw;
-    splitIdx = i + 1;
-    if (chars[i] === " ") lastSpace = i;
+    if (chars[i] !== " ") continue;
+    const wBefore = i > 0 ? cumWidth[i - 1]! : 0;
+    const wAfter = total - cumWidth[i]!;
+    if (wBefore === 0 || wAfter === 0) continue;
+    if (wBefore > maxLineWidth) break;
+    if (total <= maxLineWidth * 2 && wAfter > maxLineWidth) continue;
+    const dist = Math.abs(wBefore - target);
+    if (dist < bestSpaceDist) {
+      bestSpaceDist = dist;
+      bestSpace = i;
+    }
   }
 
   let line1: string;
   let rest: string;
-  if (lastSpace > 0 && lastSpace >= Math.floor(splitIdx * 0.45)) {
-    line1 = chars.slice(0, lastSpace).join("").trim();
-    rest = chars.slice(lastSpace + 1).join("").trim();
+  if (bestSpace !== -1 && bestSpaceDist <= maxLineWidth * 0.35) {
+    line1 = chars.slice(0, bestSpace).join("").trim();
+    rest = chars.slice(bestSpace + 1).join("").trim();
   } else {
-    line1 = chars.slice(0, Math.max(1, splitIdx)).join("").trim();
-    rest = chars.slice(Math.max(1, splitIdx)).join("").trim();
+    // Split at the character boundary closest to `target` without exceeding maxLineWidth
+    let splitIdx = 1;
+    let bestDist = Infinity;
+    for (let i = 0; i < chars.length - 1; i++) {
+      const w1 = cumWidth[i]!;
+      const w2 = total - w1;
+      if (w1 > maxLineWidth) break;
+      if (total <= maxLineWidth * 2 && w2 > maxLineWidth) continue;
+      const dist = Math.abs(w1 - target);
+      if (dist < bestDist) {
+        bestDist = dist;
+        splitIdx = i + 1;
+      }
+    }
+    line1 = chars.slice(0, splitIdx).join("").trim();
+    rest = chars.slice(splitIdx).join("").trim();
   }
 
   if (!rest) return line1;

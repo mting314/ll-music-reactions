@@ -57,18 +57,20 @@ describe("overlayCoords", () => {
 });
 
 describe("formatSongLabel", () => {
-  test("keeps short English and Japanese titles on one line", () => {
+  test("keeps short and medium English/Japanese titles on one line without orphan wrap", () => {
     expect(formatSongLabel("Snow halation")).toBe("Snow halation");
     expect(formatSongLabel("ユメノトビラ")).toBe("ユメノトビラ");
+    expect(formatSongLabel("届かない星だとしても")).toBe("届かない星だとしても");
   });
 
-  test("wraps longer titles onto 2 lines preferring spaces", () => {
-    expect(formatSongLabel("僕らのLIVE 君とのLIFE")).toBe(
-      "僕らのLIVE\n君とのLIFE",
-    );
+  test("wraps longer titles evenly around the midpoint (no hanging orphan character)", () => {
     expect(formatSongLabel("SUPER SUMMER SENSATION!!")).toBe(
       "SUPER SUMMER\nSENSATION!!",
     );
+    const wrapped = formatSongLabel("君のこころは輝いてるかい？");
+    const [l1, l2] = wrapped.split("\n");
+    expect(l1).toBe("君のこころは");
+    expect(l2).toBe("輝いてるかい？");
   });
 
   test("truncates very long titles on line 2 with an ellipsis", () => {
