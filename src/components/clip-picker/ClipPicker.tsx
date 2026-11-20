@@ -46,7 +46,7 @@ export function ClipPicker({ onSelect, onClose }: ClipPickerProps) {
                   onMouseLeave={() => setPreviewId(null)}
                   className="w-full rounded-lg bg-gray-800 p-2 text-left transition-colors hover:bg-gray-700"
                 >
-                  <div className="relative mb-2 aspect-video overflow-hidden rounded bg-gray-900">
+                  <div className="relative mb-2 aspect-square overflow-hidden rounded bg-gray-900">
                     {previewId === clip.id ? (
                       <video
                         src={getClipUrl(clip)}

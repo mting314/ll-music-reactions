@@ -10,7 +10,7 @@
     ],
     "filename": "clip-01.mp4",
     "thumbnailFilename": "clip-01.jpg",
-    "durationMs": 1800
+    "durationMs": 3600
   },
   {
     "id": "clip-02",
@@ -23,7 +23,7 @@
     ],
     "filename": "clip-02.mp4",
     "thumbnailFilename": "clip-02.jpg",
-    "durationMs": 1733
+    "durationMs": 3467
   },
   {
     "id": "clip-03",
@@ -36,7 +36,7 @@
     ],
     "filename": "clip-03.mp4",
     "thumbnailFilename": "clip-03.jpg",
-    "durationMs": 1800
+    "durationMs": 3600
   },
   {
     "id": "clip-04",
@@ -49,7 +49,7 @@
     ],
     "filename": "clip-04.mp4",
     "thumbnailFilename": "clip-04.jpg",
-    "durationMs": 1767
+    "durationMs": 3533
   },
   {
     "id": "clip-05",
@@ -62,7 +62,7 @@
     ],
     "filename": "clip-05.mp4",
     "thumbnailFilename": "clip-05.jpg",
-    "durationMs": 1800
+    "durationMs": 3600
   },
   {
     "id": "clip-06",
@@ -75,7 +75,7 @@
     ],
     "filename": "clip-06.mp4",
     "thumbnailFilename": "clip-06.jpg",
-    "durationMs": 1767
+    "durationMs": 3533
   },
   {
     "id": "clip-07",
@@ -88,7 +88,7 @@
     ],
     "filename": "clip-07.mp4",
     "thumbnailFilename": "clip-07.jpg",
-    "durationMs": 1766
+    "durationMs": 3533
   },
   {
     "id": "clip-08",
@@ -102,7 +102,7 @@
     ],
     "filename": "clip-08.mp4",
     "thumbnailFilename": "clip-08.jpg",
-    "durationMs": 1767
+    "durationMs": 3533
   },
   {
     "id": "clip-09",
@@ -115,7 +115,7 @@
     ],
     "filename": "clip-09.mp4",
     "thumbnailFilename": "clip-09.jpg",
-    "durationMs": 1867
+    "durationMs": 3733
   },
   {
     "id": "clip-10",
@@ -128,7 +128,7 @@
     ],
     "filename": "clip-10.mp4",
     "thumbnailFilename": "clip-10.jpg",
-    "durationMs": 1833
+    "durationMs": 3667
   },
   {
     "id": "clip-11",
@@ -141,7 +141,7 @@
     ],
     "filename": "clip-11.mp4",
     "thumbnailFilename": "clip-11.jpg",
-    "durationMs": 1767
+    "durationMs": 3533
   },
   {
     "id": "clip-12",
@@ -154,7 +154,7 @@
     ],
     "filename": "clip-12.mp4",
     "thumbnailFilename": "clip-12.jpg",
-    "durationMs": 1833
+    "durationMs": 3667
   },
   {
     "id": "clip-13",
@@ -167,7 +167,7 @@
     ],
     "filename": "clip-13.mp4",
     "thumbnailFilename": "clip-13.jpg",
-    "durationMs": 1800
+    "durationMs": 3600
   },
   {
     "id": "clip-14",
@@ -180,7 +180,7 @@
     ],
     "filename": "clip-14.mp4",
     "thumbnailFilename": "clip-14.jpg",
-    "durationMs": 1833
+    "durationMs": 3667
   },
   {
     "id": "clip-15",
@@ -193,6 +193,277 @@
     ],
     "filename": "clip-15.mp4",
     "thumbnailFilename": "clip-15.jpg",
-    "durationMs": 1487
+    "durationMs": 3000
+  },
+  {
+    "id": "clip-16",
+    "name": "Mind Blown",
+    "tags": [
+      "mind-blown",
+      "hands-on-head",
+      "overwhelmed",
+      "drop"
+    ],
+    "filename": "clip-16.mp4",
+    "thumbnailFilename": "clip-16.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-17",
+    "name": "Cracking Up",
+    "tags": [
+      "laughing",
+      "grin",
+      "happy",
+      "vibing",
+      "arms-crossed"
+    ],
+    "filename": "clip-17.mp4",
+    "thumbnailFilename": "clip-17.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-18",
+    "name": "Touched",
+    "tags": [
+      "touched",
+      "heartfelt",
+      "hands-on-chest",
+      "emotional"
+    ],
+    "filename": "clip-18.mp4",
+    "thumbnailFilename": "clip-18.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-19",
+    "name": "Kicking Feet",
+    "tags": [
+      "kicking-feet",
+      "curled-up",
+      "giddy",
+      "excited",
+      "cute"
+    ],
+    "filename": "clip-19.mp4",
+    "thumbnailFilename": "clip-19.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-20",
+    "name": "Wholesome Smile",
+    "tags": [
+      "smiling",
+      "wholesome",
+      "happy",
+      "cute",
+      "warm"
+    ],
+    "filename": "clip-20.mp4",
+    "thumbnailFilename": "clip-20.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-21",
+    "name": "Ascended",
+    "tags": [
+      "ascended",
+      "floating",
+      "eyes-rolled",
+      "peak"
+    ],
+    "filename": "clip-21.mp4",
+    "thumbnailFilename": "clip-21.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-22",
+    "name": "Speechless",
+    "tags": [
+      "speechless",
+      "wide-eyed",
+      "staring",
+      "stunned"
+    ],
+    "filename": "clip-22.mp4",
+    "thumbnailFilename": "clip-22.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-23",
+    "name": "Devious Grin",
+    "tags": [
+      "smirk",
+      "grin",
+      "devious",
+      "close-up",
+      "mischievous"
+    ],
+    "filename": "clip-23.mp4",
+    "thumbnailFilename": "clip-23.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-24",
+    "name": "Going Crazy",
+    "tags": [
+      "headbanging",
+      "hype",
+      "going-crazy",
+      "banger",
+      "wild"
+    ],
+    "filename": "clip-24.mp4",
+    "thumbnailFilename": "clip-24.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-25",
+    "name": "Soul Left Body",
+    "tags": [
+      "soul-left-body",
+      "ascended",
+      "eyes-rolled",
+      "mind-blown"
+    ],
+    "filename": "clip-25.mp4",
+    "thumbnailFilename": "clip-25.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-26",
+    "name": "Melted",
+    "tags": [
+      "melted",
+      "defeated",
+      "slumped",
+      "exhausted",
+      "done"
+    ],
+    "filename": "clip-26.mp4",
+    "thumbnailFilename": "clip-26.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-27",
+    "name": "Levitating",
+    "tags": [
+      "levitating",
+      "heavenly",
+      "looking-up",
+      "euphoric"
+    ],
+    "filename": "clip-27.mp4",
+    "thumbnailFilename": "clip-27.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-28",
+    "name": "Unhinged",
+    "tags": [
+      "screaming",
+      "unhinged",
+      "close-up",
+      "hype",
+      "intense"
+    ],
+    "filename": "clip-28.mp4",
+    "thumbnailFilename": "clip-28.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-29",
+    "name": "Thumbs Up",
+    "tags": [
+      "thumbs-up",
+      "approved",
+      "respect",
+      "10-out-of-10"
+    ],
+    "filename": "clip-29.mp4",
+    "thumbnailFilename": "clip-29.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-30",
+    "name": "Giggling",
+    "tags": [
+      "giggling",
+      "laughing",
+      "flattered",
+      "delighted",
+      "cute"
+    ],
+    "filename": "clip-30.mp4",
+    "thumbnailFilename": "clip-30.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-31",
+    "name": "Vibing",
+    "tags": [
+      "vibing",
+      "grooving",
+      "head-bob",
+      "dancing",
+      "bop"
+    ],
+    "filename": "clip-31.mp4",
+    "thumbnailFilename": "clip-31.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-32",
+    "name": "Hold Up",
+    "tags": [
+      "hold-up",
+      "wait-a-minute",
+      "hyped",
+      "reacting"
+    ],
+    "filename": "clip-32.mp4",
+    "thumbnailFilename": "clip-32.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-33",
+    "name": "Hands Up",
+    "tags": [
+      "hands-up",
+      "swaying",
+      "bliss",
+      "vibing",
+      "concert"
+    ],
+    "filename": "clip-33.mp4",
+    "thumbnailFilename": "clip-33.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-34",
+    "name": "Sobbing",
+    "tags": [
+      "sobbing",
+      "crying",
+      "face-in-hands",
+      "devastated"
+    ],
+    "filename": "clip-34.mp4",
+    "thumbnailFilename": "clip-34.jpg",
+    "durationMs": 3600
+  },
+  {
+    "id": "clip-35",
+    "name": "Walked Out",
+    "tags": [
+      "walked-out",
+      "empty-chair",
+      "left",
+      "done",
+      "skip"
+    ],
+    "filename": "clip-35.mp4",
+    "thumbnailFilename": "clip-35.jpg",
+    "durationMs": 3600
   }
 ]
