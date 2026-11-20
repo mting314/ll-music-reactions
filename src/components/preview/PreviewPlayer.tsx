@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { getAlbumArtUrl, useClips } from '@/hooks/useData';
 import { getClipUrl } from '@/hooks/useClipLibrary';
+import {
+  analyzeAudio,
+  getCachedSuggestedStart,
+} from '@/utils/audioAnalysis';
 import type { TimelineEntry, Song, Discography } from '@/types';
 
 interface PreviewPlayerProps {
@@ -35,7 +39,55 @@ export function PreviewPlayer({
     ? getAlbumArtUrl(currentSong, discographyMap)
     : null;
   const currentAudioUrl = currentSong?.wikiAudioUrl ?? null;
-  const currentStartTime = currentEntry?.songStartTime ?? 0;
+
+  const [resolvedAuto, setResolvedAuto] = useState<{
+    url: string;
+    start: number;
+  } | null>(null);
+
+  const cachedCurrentStart = getCachedSuggestedStart(currentAudioUrl);
+  const autoStartForCurrent =
+    cachedCurrentStart ??
+    (resolvedAuto && resolvedAuto.url === currentAudioUrl
+      ? resolvedAuto.start
+      : null);
+
+  useEffect(() => {
+    if (
+      currentEntry?.songStartTime != null ||
+      !currentAudioUrl ||
+      cachedCurrentStart != null
+    ) {
+      return;
+    }
+    let cancelled = false;
+    analyzeAudio(currentAudioUrl).then((a) => {
+      if (!cancelled) {
+        setResolvedAuto({
+          url: currentAudioUrl,
+          start: a.suggestedStart ?? a.leadIn ?? 0,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEntry?.songStartTime, currentAudioUrl, cachedCurrentStart]);
+
+  // Pre-warm the next entry's auto-detected start time so transitions stay crisp
+  const nextEntry = validEntries[currentIndex + 1];
+  const nextAudioUrl =
+    nextEntry && nextEntry.songStartTime == null && nextEntry.songId
+      ? (songMap.get(nextEntry.songId)?.wikiAudioUrl ?? null)
+      : null;
+  useEffect(() => {
+    if (nextAudioUrl && getCachedSuggestedStart(nextAudioUrl) == null) {
+      void analyzeAudio(nextAudioUrl);
+    }
+  }, [nextAudioUrl]);
+
+  const currentStartTime =
+    currentEntry?.songStartTime ?? autoStartForCurrent ?? 0;
 
   const playNext = useCallback(() => {
     if (currentIndex < validEntries.length - 1) {

@@ -21,162 +21,90 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getAlbumArtUrl } from '@/hooks/useData';
-import { detectLeadIn, computePeaks } from '@/utils/audio';
+import { useAudioAnalysis } from '@/utils/audioAnalysis';
 import { clamp, positionToTime, timeToPercent, waveformPath } from '@/utils/scrubber';
 import { formatTime, parseTime } from '@/utils/time';
 import type { TimelineEntry, Song, Discography, ReactionClip } from '@/types';
 
-function TimeInput({ value, onChange }: { value: number | null; onChange: (t: number | null) => void }) {
+function TimeInput({
+  value,
+  isAuto,
+  onChange,
+}: {
+  value: number | null;
+  isAuto: boolean;
+  onChange: (t: number | null) => void;
+}) {
   const [text, setText] = useState(value != null ? formatTime(value) : '');
 
-  // Reflect external changes (e.g. set via the scrubber) into the text box.
-  // `value` only changes after a commit, never mid-typing, so this won't
-  // clobber in-progress input.
+  // Reflect external changes (e.g. set via the scrubber or resolved auto-start)
+  // into the text box. `value` only changes after a commit or analysis resolve,
+  // never mid-typing, so this won't clobber in-progress input.
   useEffect(() => {
     setText(value != null ? formatTime(value) : '');
   }, [value]);
 
   const commit = () => {
-    const t = text.trim() ? parseTime(text) : null;
+    const trimmed = text.trim();
+    if (!trimmed) {
+      onChange(null);
+      return;
+    }
+    const t = parseTime(trimmed);
+    // If the user blurred without modifying an auto-populated time, keep Auto
+    // active instead of needlessly turning it into a manual override.
+    if (isAuto && value != null && t != null && formatTime(t) === formatTime(value)) {
+      return;
+    }
     onChange(t);
     if (t != null) setText(formatTime(t));
   };
 
   return (
-    <input
-      type="text"
-      placeholder="0:00.000"
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
-      className="w-20 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs tabular-nums text-gray-300 outline-none focus:ring-1 focus:ring-pink-500"
-      title="Song start time (m:ss.mmm)"
-    />
+    <div className="flex shrink-0 items-center gap-1">
+      <input
+        type="text"
+        placeholder="0:00.000"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        className={`w-20 shrink-0 rounded bg-gray-900 px-2 py-1 text-center text-xs tabular-nums outline-none focus:ring-1 focus:ring-pink-500 ${
+          isAuto ? 'text-pink-300/90' : 'text-gray-300'
+        }`}
+        title={
+          isAuto
+            ? 'Auto-detected chorus start time (edit or drag scrubber to override)'
+            : 'Song start time (m:ss.mmm) — clear to revert to Auto'
+        }
+      />
+      {isAuto ? (
+        <span
+          className="rounded bg-pink-600/20 px-1.5 py-0.5 text-[10px] font-medium text-pink-300"
+          title="Auto-detected chorus/hook start time"
+        >
+          Auto
+        </span>
+      ) : value != null ? (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="rounded px-1 py-0.5 text-[11px] text-gray-500 hover:bg-gray-700 hover:text-pink-300"
+          title="Reset to auto-detected chorus start time"
+          aria-label="Reset start time to auto"
+        >
+          ↺
+        </button>
+      ) : null}
+    </div>
   );
 }
 
 // Only one row's audio should play at a time. Tracked at module scope so a
 // row starting playback can pause whichever row was playing before.
 let currentlyPlaying: HTMLAudioElement | null = null;
-
-interface AudioAnalysis {
-  leadIn: number;
-  duration: number;
-  failed: boolean;
-  // Object URL for the downloaded audio, reused for playback so the file is
-  // fetched once (decode + <audio> share it) instead of downloaded twice.
-  blobUrl: string | null;
-  // Normalized waveform peaks (post-lead-in), for drawing the timeline.
-  peaks: number[];
-}
-
-// Waveform resolution — peaks per song. ~enough detail at the 8× max zoom
-// without bloating the cached path string.
-const WAVE_BUCKETS = 500;
-
-// A single shared AudioContext for ALL decodes. Browsers hard-cap the number of
-// AudioContexts (~6 in Chrome) and throw once exceeded — creating one per row
-// (doubled by StrictMode in dev) blows that limit and makes every decode fail.
-// One shared, never-closed context sidesteps it.
-let sharedAudioCtx: AudioContext | null = null;
-function getAudioCtx(): AudioContext | null {
-  if (sharedAudioCtx) return sharedAudioCtx;
-  const Ctx =
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext;
-  if (!Ctx) return null;
-  sharedAudioCtx = new Ctx();
-  return sharedAudioCtx;
-}
-
-const PENDING_ANALYSIS: AudioAnalysis = {
-  leadIn: 0,
-  duration: 0,
-  failed: false,
-  blobUrl: null,
-  peaks: [],
-};
-
-// Decoded results are cached by URL (module scope) so a song is only ever
-// fetched + decoded once — across rows, reorders, remounts, and duplicate songs.
-const analysisCache = new Map<string, AudioAnalysis>();
-const analysisInflight = new Map<string, Promise<AudioAnalysis>>();
-
-/**
- * Fetch + decode a song's audio (Web Audio API) once, returning its leading
- * silence AND exact duration. We use the decoded buffer rather than the <audio>
- * element's metadata because the catalog audio is Ogg, whose element-reported
- * `duration` is often `Infinity` in Chrome until fully buffered. Result (incl.
- * `failed`) is cached and in-flight requests are de-duped.
- */
-function analyzeAudio(src: string): Promise<AudioAnalysis> {
-  const cached = analysisCache.get(src);
-  if (cached) return Promise.resolve(cached);
-  const existing = analysisInflight.get(src);
-  if (existing) return existing;
-
-  const p = (async (): Promise<AudioAnalysis> => {
-    try {
-      // no-referrer is required: fandom hotlink-protection 404s any request
-      // carrying an external Referer (same as the album-art <img>s).
-      const res = await fetch(src, { mode: 'cors', referrerPolicy: 'no-referrer' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Keep the bytes as a Blob for playback; arrayBuffer() gives a copy for
-      // decode (decodeAudioData detaches its input, leaving the Blob intact).
-      const blob = await res.blob();
-      const ctx = getAudioCtx();
-      if (!ctx) throw new Error('no AudioContext');
-      const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
-      const channel = buf.getChannelData(0);
-      const leadIn = detectLeadIn(channel, buf.sampleRate);
-      return {
-        leadIn,
-        duration: buf.duration,
-        failed: false,
-        blobUrl: URL.createObjectURL(blob),
-        peaks: computePeaks(channel, Math.floor(leadIn * buf.sampleRate), WAVE_BUCKETS),
-      };
-    } catch {
-      return { leadIn: 0, duration: 0, failed: true, blobUrl: null, peaks: [] };
-    }
-  })()
-    .then((a) => {
-      analysisCache.set(src, a);
-      return a;
-    })
-    .finally(() => analysisInflight.delete(src));
-
-  analysisInflight.set(src, p);
-  return p;
-}
-
-/**
- * Lazily analyze a song's audio: the fetch + decode (a full ~MBs download per
- * song) only runs once `active` is true — wired to viewport visibility so a long
- * timeline doesn't decode every off-screen row up front. Cached results return
- * synchronously.
- */
-function useAudioAnalysis(src: string | null | undefined, active: boolean): AudioAnalysis {
-  const [, forceUpdate] = useState(0);
-  const cached = src ? analysisCache.get(src) : undefined;
-
-  useEffect(() => {
-    if (!src || !active || analysisCache.has(src)) return;
-    let cancelled = false;
-    analyzeAudio(src).then(() => {
-      if (!cancelled) forceUpdate((n) => n + 1);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [src, active]);
-
-  return cached ?? PENDING_ANALYSIS;
-}
 
 /**
  * Report when an element has first scrolled into (or near) the viewport, so work
@@ -662,15 +590,17 @@ function SortableRow({
   // offsets (the exporter consumes them) but shown relative to the music onset,
   // so the blank space at the top of the file is skipped in the UI.
   const [scrubberRef, inView] = useInView<HTMLDivElement>();
-  const { leadIn, duration, failed, blobUrl, peaks } = useAudioAnalysis(
-    song?.wikiAudioUrl,
-    inView,
-  );
-  const relStart = entry.songStartTime == null ? null : Math.max(0, entry.songStartTime - leadIn);
+  const { leadIn, duration, suggestedStart, failed, blobUrl, peaks } =
+    useAudioAnalysis(song?.wikiAudioUrl, inView);
+  const effectiveStart = entry.songStartTime ?? suggestedStart;
+  const relStart =
+    effectiveStart == null ? null : Math.max(0, effectiveStart - leadIn);
   // Live marker position while it's being dragged, so the displayed start time
   // tracks the scrub in realtime; the actual commit still happens on release.
   const [liveStartRel, setLiveStartRel] = useState<number | null>(null);
   const shownStartRel = liveStartRel ?? relStart;
+  const isAuto =
+    entry.songStartTime == null && suggestedStart != null && liveStartRel == null;
 
   return (
     <div
@@ -726,6 +656,7 @@ function SortableRow({
         {song && (
           <TimeInput
             value={shownStartRel}
+            isAuto={isAuto}
             onChange={(t) =>
               onUpdateStartTime(
                 entry.id,
@@ -755,7 +686,7 @@ function SortableRow({
           <AudioScrubber
             key={entry.songId}
             src={blobUrl}
-            startTime={entry.songStartTime}
+            startTime={effectiveStart}
             leadIn={leadIn}
             duration={duration}
             peaks={peaks}
