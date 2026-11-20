@@ -2,9 +2,9 @@
 # Bun runtime + ffmpeg, with reaction clips bundled in at /app/clips.
 FROM oven/bun:1.3-debian
 
-# ffmpeg is the only system dependency the export job needs.
+# ffmpeg + Noto CJK fonts (for Japanese song-name labels below album art).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg \
+  && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

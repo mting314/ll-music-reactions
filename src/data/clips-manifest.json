@@ -1,18 +1,5 @@
 [
   {
-    "id": "clip-01",
-    "name": "Let's Go",
-    "tags": [
-      "anticipation",
-      "rubbing-hands",
-      "ready",
-      "excited"
-    ],
-    "filename": "clip-01.mp4",
-    "thumbnailFilename": "clip-01.jpg",
-    "durationMs": 3600
-  },
-  {
     "id": "clip-02",
     "name": "Not Feeling It",
     "tags": [

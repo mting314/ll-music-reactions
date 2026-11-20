@@ -199,26 +199,22 @@ export function PreviewPlayer({
             />
           )}
 
-          {currentArtUrl && (
-            <div className="absolute right-[2.8%] top-[2.8%] w-1/4">
-              <img
-                src={currentArtUrl}
-                alt=""
-                className="aspect-square w-full rounded-lg shadow-lg border border-white/20 object-cover"
-                crossOrigin="anonymous"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          )}
-
-          {currentSong && (
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-              <p className="text-sm font-medium text-white">
-                {currentSong.name}
-              </p>
-              <p className="text-xs text-gray-300">
-                {currentSong.englishName}
-              </p>
+          {(currentArtUrl || currentSong) && (
+            <div className="absolute right-[2.8%] top-[2.8%] flex w-1/4 flex-col items-center gap-1.5">
+              {currentArtUrl && (
+                <img
+                  src={currentArtUrl}
+                  alt=""
+                  className="aspect-square w-full rounded-lg shadow-lg border border-white/20 object-cover"
+                  crossOrigin="anonymous"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              {currentSong && (
+                <p className="line-clamp-2 max-w-full text-balance rounded bg-black/60 px-1.5 py-0.5 text-center text-xs font-semibold leading-tight text-white drop-shadow">
+                  {currentSong.name}
+                </p>
+              )}
             </div>
           )}
         </div>
