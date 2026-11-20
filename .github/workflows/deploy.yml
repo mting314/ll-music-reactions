@@ -46,7 +46,7 @@ jobs:
         run: bun install
 
       - name: Build
-        # .env.production supplies VITE_DATA_BASE / VITE_EXPORT_API.
+        # .env.production supplies VITE_DATA_BASE.
         # No data is bundled — the app fetches per-entity JSON from VITE_DATA_BASE at runtime.
         run: bun run build
 

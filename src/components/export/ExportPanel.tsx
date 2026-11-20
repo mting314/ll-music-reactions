@@ -21,10 +21,9 @@ function formatElapsed(ms: number): string {
 
 const PHASE_LABEL: Record<ExportStatus['phase'], string> = {
   analyzing: 'Detecting song hooks',
-  preparing: 'Preparing export',
-  assets: 'Fetching album art & audio',
-  encoding: 'Stitching clips on the cloud',
-  finalizing: 'Finalizing your video',
+  assets: 'Loading album art & audio',
+  encoding: 'Encoding video in your browser',
+  finalizing: 'Finalizing MP4',
 };
 
 export function ExportPanel({
@@ -129,16 +128,13 @@ export function ExportPanel({
         {isExporting && status && (
           <div className="py-1">
             {(() => {
-              // Determinate bar during hook detection and ffmpeg percentage.
               const pct =
-                status.phase === 'analyzing' && status.assetTotal > 0
+                (status.phase === 'analyzing' || status.phase === 'assets') &&
+                status.assetTotal > 0
                   ? Math.round((status.assetIndex / status.assetTotal) * 100)
                   : status.phase === 'encoding' && status.encodePct !== null
                     ? status.encodePct
                     : null;
-              const warming =
-                status.phase === 'preparing' ||
-                (status.phase === 'encoding' && status.encodePct === null);
 
               let detail: string;
               if (status.phase === 'analyzing') {
@@ -176,12 +172,6 @@ export function ExportPanel({
                   </div>
 
                   <p className="text-xs text-gray-400">{detail}</p>
-
-                  {warming && (
-                    <p className="mt-1 text-[11px] text-gray-600">
-                      The first export can take a few extra seconds to warm up.
-                    </p>
-                  )}
                 </>
               );
             })()}

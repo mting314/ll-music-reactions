@@ -331,6 +331,24 @@ export async function resolveSuggestedStart(
 }
 
 /**
+ * Decode an already-fetched local `blob:` URL into an `AudioBuffer` using the
+ * shared AudioContext (zero network traffic, respects browser AudioContext cap).
+ */
+export async function decodeBlobUrl(
+  blobUrl: string,
+): Promise<AudioBuffer | null> {
+  const ctx = getAudioCtx();
+  if (!ctx) return null;
+  try {
+    const resp = await fetch(blobUrl);
+    if (!resp.ok) return null;
+    return await ctx.decodeAudioData(await resp.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Lazily analyze a song's audio: the fetch + decode (a full ~MBs download per
  * song) only runs once `active` is true — wired to viewport visibility so a long
  * timeline doesn't decode every off-screen row up front. Cached results return
