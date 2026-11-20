@@ -40,39 +40,54 @@ export function PreviewPlayer({
     : null;
   const currentAudioUrl = currentSong?.wikiAudioUrl ?? null;
 
-  const [resolvedAutoStart, setResolvedAutoStart] = useState<number | null>(
-    () => getCachedSuggestedStart(currentAudioUrl),
-  );
+  const [resolvedAuto, setResolvedAuto] = useState<{
+    url: string;
+    start: number;
+  } | null>(null);
+
+  const cachedCurrentStart = getCachedSuggestedStart(currentAudioUrl);
+  const autoStartForCurrent =
+    cachedCurrentStart ??
+    (resolvedAuto && resolvedAuto.url === currentAudioUrl
+      ? resolvedAuto.start
+      : null);
 
   useEffect(() => {
-    if (currentEntry?.songStartTime != null || !currentAudioUrl) {
-      setResolvedAutoStart(null);
+    if (
+      currentEntry?.songStartTime != null ||
+      !currentAudioUrl ||
+      cachedCurrentStart != null
+    ) {
       return;
     }
-    const cached = getCachedSuggestedStart(currentAudioUrl);
-    setResolvedAutoStart(cached);
-    if (cached != null) return;
     let cancelled = false;
     analyzeAudio(currentAudioUrl).then((a) => {
-      if (!cancelled) setResolvedAutoStart(a.suggestedStart ?? a.leadIn ?? 0);
+      if (!cancelled) {
+        setResolvedAuto({
+          url: currentAudioUrl,
+          start: a.suggestedStart ?? a.leadIn ?? 0,
+        });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [currentEntry?.songStartTime, currentAudioUrl]);
+  }, [currentEntry?.songStartTime, currentAudioUrl, cachedCurrentStart]);
 
   // Pre-warm the next entry's auto-detected start time so transitions stay crisp
+  const nextEntry = validEntries[currentIndex + 1];
+  const nextAudioUrl =
+    nextEntry && nextEntry.songStartTime == null && nextEntry.songId
+      ? (songMap.get(nextEntry.songId)?.wikiAudioUrl ?? null)
+      : null;
   useEffect(() => {
-    const nextEntry = validEntries[currentIndex + 1];
-    if (!nextEntry || nextEntry.songStartTime != null || !nextEntry.songId) return;
-    const nextUrl = songMap.get(nextEntry.songId)?.wikiAudioUrl;
-    if (nextUrl && getCachedSuggestedStart(nextUrl) == null) {
-      void analyzeAudio(nextUrl);
+    if (nextAudioUrl && getCachedSuggestedStart(nextAudioUrl) == null) {
+      void analyzeAudio(nextAudioUrl);
     }
-  }, [currentIndex, validEntries, songMap]);
+  }, [nextAudioUrl]);
 
   const currentStartTime =
-    currentEntry?.songStartTime ?? resolvedAutoStart ?? 0;
+    currentEntry?.songStartTime ?? autoStartForCurrent ?? 0;
 
   const playNext = useCallback(() => {
     if (currentIndex < validEntries.length - 1) {

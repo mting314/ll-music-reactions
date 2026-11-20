@@ -224,7 +224,13 @@ function runHighlightDetection(
       sampleRate,
       leadIn,
     };
-    worker.postMessage(req, [copy.buffer]);
+    try {
+      worker.postMessage(req, [copy.buffer]);
+    } catch {
+      worker.removeEventListener('error', onError);
+      workerPending.delete(id);
+      resolve(detectHighlightStart(channel, sampleRate, { leadIn }));
+    }
   });
 }
 
