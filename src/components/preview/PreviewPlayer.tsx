@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { getAlbumArtUrl, useClips } from '@/hooks/useData';
 import { getClipUrl } from '@/hooks/useClipLibrary';
+import {
+  analyzeAudio,
+  getCachedSuggestedStart,
+} from '@/utils/audioAnalysis';
 import type { TimelineEntry, Song, Discography } from '@/types';
 
 interface PreviewPlayerProps {
@@ -35,7 +39,40 @@ export function PreviewPlayer({
     ? getAlbumArtUrl(currentSong, discographyMap)
     : null;
   const currentAudioUrl = currentSong?.wikiAudioUrl ?? null;
-  const currentStartTime = currentEntry?.songStartTime ?? 0;
+
+  const [resolvedAutoStart, setResolvedAutoStart] = useState<number | null>(
+    () => getCachedSuggestedStart(currentAudioUrl),
+  );
+
+  useEffect(() => {
+    if (currentEntry?.songStartTime != null || !currentAudioUrl) {
+      setResolvedAutoStart(null);
+      return;
+    }
+    const cached = getCachedSuggestedStart(currentAudioUrl);
+    setResolvedAutoStart(cached);
+    if (cached != null) return;
+    let cancelled = false;
+    analyzeAudio(currentAudioUrl).then((a) => {
+      if (!cancelled) setResolvedAutoStart(a.suggestedStart ?? a.leadIn ?? 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEntry?.songStartTime, currentAudioUrl]);
+
+  // Pre-warm the next entry's auto-detected start time so transitions stay crisp
+  useEffect(() => {
+    const nextEntry = validEntries[currentIndex + 1];
+    if (!nextEntry || nextEntry.songStartTime != null || !nextEntry.songId) return;
+    const nextUrl = songMap.get(nextEntry.songId)?.wikiAudioUrl;
+    if (nextUrl && getCachedSuggestedStart(nextUrl) == null) {
+      void analyzeAudio(nextUrl);
+    }
+  }, [currentIndex, validEntries, songMap]);
+
+  const currentStartTime =
+    currentEntry?.songStartTime ?? resolvedAutoStart ?? 0;
 
   const playNext = useCallback(() => {
     if (currentIndex < validEntries.length - 1) {

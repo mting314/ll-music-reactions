@@ -43,7 +43,12 @@ export default function App() {
 
   const handleSelectSong = (songId: string) => {
     if (picker.type === 'song') {
-      timeline.updateEntry(picker.entryId, { songId });
+      const existing = timeline.entries.find((e) => e.id === picker.entryId);
+      const updates =
+        existing?.songId !== songId
+          ? { songId, songStartTime: null }
+          : { songId };
+      timeline.updateEntry(picker.entryId, updates);
     } else if (picker.type === 'addSong') {
       // New entry starts from the chosen song (clip added afterward).
       timeline.addEntry(null, songId);

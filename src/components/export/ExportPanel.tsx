@@ -20,6 +20,7 @@ function formatElapsed(ms: number): string {
 }
 
 const PHASE_LABEL: Record<ExportStatus['phase'], string> = {
+  analyzing: 'Detecting song hooks',
   preparing: 'Preparing export',
   assets: 'Fetching album art & audio',
   encoding: 'Stitching clips on the cloud',
@@ -128,17 +129,21 @@ export function ExportPanel({
         {isExporting && status && (
           <div className="py-1">
             {(() => {
-              // Determinate bar only while ffmpeg reports a real percentage.
+              // Determinate bar during hook detection and ffmpeg percentage.
               const pct =
-                status.phase === 'encoding' && status.encodePct !== null
-                  ? status.encodePct
-                  : null;
+                status.phase === 'analyzing' && status.assetTotal > 0
+                  ? Math.round((status.assetIndex / status.assetTotal) * 100)
+                  : status.phase === 'encoding' && status.encodePct !== null
+                    ? status.encodePct
+                    : null;
               const warming =
                 status.phase === 'preparing' ||
                 (status.phase === 'encoding' && status.encodePct === null);
 
               let detail: string;
-              if (status.phase === 'assets') {
+              if (status.phase === 'analyzing') {
+                detail = `Song ${status.assetIndex} of ${status.assetTotal}`;
+              } else if (status.phase === 'assets') {
                 detail = `Media ${status.assetIndex} of ${status.assetTotal}`;
               } else if (pct !== null) {
                 detail = `${pct}% encoded`;

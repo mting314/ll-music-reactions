@@ -1,5 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
 import { getAlbumArtUrl } from '@/hooks/useData';
+import {
+  getCachedSuggestedStart,
+  resolveSuggestedStart,
+} from '@/utils/audioAnalysis';
 import type { TimelineEntry, Song, Discography, ExportSettings } from '@/types';
 import clipManifest from '@/data/clips-manifest.json';
 import type { ReactionClip } from '@/types';
@@ -12,14 +16,19 @@ const EXPORT_BASE =
   import.meta.env.VITE_EXPORT_API ?? 'http://localhost:3001';
 const EXPORT_API = `${EXPORT_BASE.replace(/\/$/, '')}/export`;
 
-// Phases reported by the server's SSE progress stream.
-export type ExportPhase = 'preparing' | 'assets' | 'encoding' | 'finalizing';
+// Phases reported by the client pre-step and server's SSE progress stream.
+export type ExportPhase =
+  | 'analyzing'
+  | 'preparing'
+  | 'assets'
+  | 'encoding'
+  | 'finalizing';
 
 export interface ExportStatus {
   phase: ExportPhase;
   entryCount: number;
   resolution: ExportSettings['resolution'];
-  // assets phase: which entry's media is being fetched (1-based).
+  // analyzing / assets phase: 1-based item index & total.
   assetIndex: number;
   assetTotal: number;
   // encoding phase: ffmpeg percent, or null when duration is unknown.
@@ -76,16 +85,85 @@ export function useVideoExport() {
       timerRef.current = setInterval(() => setElapsedMs(Date.now() - startedAt), 500);
 
       try {
+        // Resolve auto-detected chorus start times for any entries still on Auto
+        // (songStartTime == null) that haven't been analyzed yet (e.g. off-screen
+        // rows in a long setlist). Dedup by URL and run with concurrency 4.
+        const uncachedUrls = Array.from(
+          new Set(
+            validEntries
+              .filter((e) => e.songStartTime == null)
+              .map((e) => (e.songId ? songMap.get(e.songId)?.wikiAudioUrl : null))
+              .filter(
+                (url): url is string =>
+                  !!url && getCachedSuggestedStart(url) == null,
+              ),
+          ),
+        );
+
+        const resolvedByUrl = new Map<string, number>();
+        if (uncachedUrls.length > 0) {
+          let doneCount = 0;
+          setStatus({
+            phase: 'analyzing',
+            entryCount: validEntries.length,
+            resolution: settings.resolution,
+            assetIndex: 0,
+            assetTotal: uncachedUrls.length,
+            encodePct: null,
+          });
+
+          const CONCURRENCY = 4;
+          let cursor = 0;
+          const worker = async () => {
+            while (cursor < uncachedUrls.length) {
+              const url = uncachedUrls[cursor++]!;
+              const startSec = await resolveSuggestedStart(url);
+              resolvedByUrl.set(url, startSec);
+              doneCount++;
+              setStatus((s) =>
+                s
+                  ? {
+                      ...s,
+                      phase: 'analyzing',
+                      assetIndex: doneCount,
+                      assetTotal: uncachedUrls.length,
+                    }
+                  : s,
+              );
+            }
+          };
+          await Promise.all(
+            Array.from({ length: Math.min(CONCURRENCY, uncachedUrls.length) }, worker),
+          );
+
+          setStatus({
+            phase: 'preparing',
+            entryCount: validEntries.length,
+            resolution: settings.resolution,
+            assetIndex: 0,
+            assetTotal: validEntries.length,
+            encodePct: null,
+          });
+        }
+
         const exportEntries = validEntries.map((entry) => {
           const clip = clips.find((c) => c.id === entry.clipId)!;
           const song = entry.songId ? songMap.get(entry.songId) : null;
           const artUrl = song ? getAlbumArtUrl(song, discographyMap) : null;
+          const audioUrl = song?.wikiAudioUrl ?? null;
+          const startTime =
+            entry.songStartTime ??
+            (audioUrl
+              ? (resolvedByUrl.get(audioUrl) ??
+                getCachedSuggestedStart(audioUrl) ??
+                0)
+              : 0);
 
           return {
             clipPath: clip.filename,
             albumArtUrl: artUrl,
-            songAudioUrl: song?.wikiAudioUrl ?? null,
-            songStartTime: entry.songStartTime ?? 0,
+            songAudioUrl: audioUrl,
+            songStartTime: startTime,
             songName: song?.name ?? 'Unknown',
             clipName: clip.name,
             durationMs: clip.durationMs,
