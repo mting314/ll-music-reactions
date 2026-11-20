@@ -35,8 +35,12 @@ const MARGIN = 20;
 const AUDIO_FORMAT =
   "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo";
 
+// Square (1:1) canvas matching the near-square reaction clips (~944-1072 x 1152),
+// with both dimensions divisible by 16 for H.264. Using a 16:9 padded canvas
+// previously left wide black pillarboxes and placed the album art outside the
+// video in the black bars.
 export function resolutionScale(resolution: ExportRequest["resolution"]): string {
-  return resolution === "720p" ? "1280:720" : "854:480";
+  return resolution === "720p" ? "720:720" : "480:480";
 }
 
 export function overlaySize(resolution: ExportRequest["resolution"]): number {
@@ -76,10 +80,11 @@ export function buildFilterComplex(
     const map = inputMap[i]!;
     const entry = req.entries[i]!;
 
-    // setsar=1 normalizes the pixel aspect ratio; concat requires identical
-    // SAR across segments, and source clips vary (e.g. 1:1 vs 1220:1221).
+    // Scale to cover the target frame and center-crop so every clip fills the
+    // canvas without black bars and the album-art corner stays rock-steady
+    // across cuts. setsar=1 normalizes pixel aspect ratio for concat.
     filterParts.push(
-      `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=decrease,pad=${scale}:-1:-1:color=black,setsar=1[scaled${i}]`,
+      `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=increase,crop=${scale},setsar=1[scaled${i}]`,
     );
 
     if (map.artIdx !== null) {
@@ -99,9 +104,16 @@ export function buildFilterComplex(
     // "received no packets" when clips differ.
     if (map.audioIdx !== null) {
       const startT = entry.songStartTime;
+      // Leave headroom past the clip's duration so amix=duration=shortest cuts
+      // cleanly at the clip's exact length rather than truncating audio early
+      // on clips longer than 3s.
+      const trimSec = Math.max(
+        5,
+        Math.ceil((entry.durationMs ?? 3600) / 1000) + 1,
+      );
       filterParts.push(`[${map.clipIdx}:a]${AUDIO_FORMAT}[clipa${i}]`);
       filterParts.push(
-        `[${map.audioIdx}:a]atrim=${startT}:${startT + 3},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[songtrim${i}]`,
+        `[${map.audioIdx}:a]atrim=${startT}:${startT + trimSec},asetpts=PTS-STARTPTS,${AUDIO_FORMAT}[songtrim${i}]`,
       );
       filterParts.push(
         `[clipa${i}][songtrim${i}]amix=inputs=2:duration=shortest,${AUDIO_FORMAT}[a${i}]`,
@@ -142,6 +154,8 @@ export function buildFfmpegArgs(
     "[outa]",
     "-c:v",
     "libx264",
+    "-pix_fmt",
+    "yuv420p",
     "-preset",
     "fast",
     "-crf",
