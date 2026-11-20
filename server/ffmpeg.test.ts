@@ -2,6 +2,7 @@ import { expect, test, describe } from "bun:test";
 import {
   buildFfmpegArgs,
   buildFilterComplex,
+  formatSongLabel,
   overlayCoords,
   overlaySize,
   parseProgressMs,
@@ -37,13 +38,17 @@ describe("overlayCoords", () => {
   test("bottom-left pins to the left edge at the bottom", () => {
     expect(overlayCoords("bottom-left", 120)).toEqual({
       x: "20",
-      y: "H-120-20",
+      y: "H-140",
     });
   });
-  test("bottom-right pins to both far edges", () => {
+  test("bottom-right pins to both far edges (with optional label reserve)", () => {
     expect(overlayCoords("bottom-right", 180)).toEqual({
       x: "W-180-20",
-      y: "H-180-20",
+      y: "H-200",
+    });
+    expect(overlayCoords("bottom-right", 180, 20, 46)).toEqual({
+      x: "W-180-20",
+      y: "H-246",
     });
   });
   test("top-left sits at the origin margin", () => {
@@ -51,9 +56,36 @@ describe("overlayCoords", () => {
   });
 });
 
+describe("formatSongLabel", () => {
+  test("keeps short English and Japanese titles on one line", () => {
+    expect(formatSongLabel("Snow halation")).toBe("Snow halation");
+    expect(formatSongLabel("ユメノトビラ")).toBe("ユメノトビラ");
+  });
+
+  test("wraps longer titles onto 2 lines preferring spaces", () => {
+    expect(formatSongLabel("僕らのLIVE 君とのLIFE")).toBe(
+      "僕らのLIVE\n君とのLIFE",
+    );
+    expect(formatSongLabel("SUPER SUMMER SENSATION!!")).toBe(
+      "SUPER SUMMER\nSENSATION!!",
+    );
+  });
+
+  test("truncates very long titles on line 2 with an ellipsis", () => {
+    const out = formatSongLabel("Colorful Dreams! Colorful Smiles! (Special Remix)");
+    const lines = out.split("\n");
+    expect(lines.length).toBe(2);
+    expect(lines[1]!.endsWith("…")).toBe(true);
+  });
+
+  test("returns empty string for blank input", () => {
+    expect(formatSongLabel("   ")).toBe("");
+  });
+});
+
 function entry(overrides: Partial<ExportRequest["entries"][0]> = {}) {
   return {
-    clipPath: "clip-01.mp4",
+    clipPath: "clip-02.mp4",
     albumArtUrl: "https://example.com/art.jpg",
     songAudioUrl: "https://example.com/song.ogg",
     songStartTime: 30,
@@ -93,6 +125,41 @@ describe("buildFilterComplex", () => {
       "[clipa0][songtrim0]amix=inputs=2:duration=shortest,aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[a0]",
     );
     expect(filter).toContain("[v0][a0]concat=n=1:v=1:a=1[outv][outa]");
+  });
+
+  test("draws song-name label right below album art when labelPath is provided", () => {
+    const req: ExportRequest = {
+      entries: [entry({ songName: "Snow halation" })],
+      resolution: "720p",
+      overlayPosition: "top-right",
+    };
+    const inputMap: InputMap[] = [
+      { clipIdx: 0, artIdx: 1, audioIdx: 2, labelPath: "/tmp/label0.txt" },
+    ];
+    const filter = buildFilterComplex(req, inputMap, {
+      fontFile: "/usr/share/fonts/NotoSansCJK-Bold.ttc",
+    });
+
+    expect(filter).toContain("[scaled0][artscaled0]overlay=W-180-20:20[artov0]");
+    expect(filter).toContain(
+      "[artov0]drawtext=fontfile=/usr/share/fonts/NotoSansCJK-Bold.ttc:textfile=/tmp/label0.txt:fontsize=16",
+    );
+    expect(filter).toContain(":y=206[v0]");
+  });
+
+  test("lifts bottom-corner album art when labelPath is provided so label fits below it", () => {
+    const req: ExportRequest = {
+      entries: [entry()],
+      resolution: "720p",
+      overlayPosition: "bottom-right",
+    };
+    const inputMap: InputMap[] = [
+      { clipIdx: 0, artIdx: 1, audioIdx: null, labelPath: "/tmp/label0.txt" },
+    ];
+    const filter = buildFilterComplex(req, inputMap);
+
+    expect(filter).toContain("[scaled0][artscaled0]overlay=W-180-20:H-246[artov0]");
+    expect(filter).toContain(":y=H-60[v0]");
   });
 
   test("longer clip durationMs expands the atrim headroom past 5s", () => {

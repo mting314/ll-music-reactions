@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { mkdtemp, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -12,11 +13,23 @@ setDefaultResultOrder("ipv4first");
 import {
   buildFfmpegArgs,
   buildFilterComplex,
+  formatSongLabel,
   parseProgressMs,
   progressPercent,
   type ExportRequest,
   type InputMap,
 } from "./ffmpeg";
+
+// Prefer a bold CJK-capable font so Japanese song titles render crisply.
+const FONT_CANDIDATES = [
+  process.env.FONT_FILE,
+  "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+  "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+  "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+  "/System/Library/Fonts/Hiragino Sans GB.ttc",
+].filter((p): p is string => Boolean(p));
+
+const FONT_FILE = FONT_CANDIDATES.find((p) => existsSync(p)) ?? null;
 
 // Cloud Run injects PORT (defaults to 8080); fall back to 3001 for local dev.
 const PORT = Number(process.env.PORT ?? 3001);
@@ -163,10 +176,17 @@ async function runExport(
       audioOk: audioIdx !== null,
     });
 
-    inputMap.push({ clipIdx, artIdx, audioIdx });
+    let labelPath: string | null = null;
+    const formattedLabel = formatSongLabel(entry.songName ?? "");
+    if (formattedLabel) {
+      labelPath = join(workDir, `label${i}.txt`);
+      await Bun.write(labelPath, formattedLabel);
+    }
+
+    inputMap.push({ clipIdx, artIdx, audioIdx, labelPath });
   }
 
-  const filterStr = buildFilterComplex(req, inputMap);
+  const filterStr = buildFilterComplex(req, inputMap, { fontFile: FONT_FILE });
   const ffmpegArgs = buildFfmpegArgs(inputArgs, filterStr, outputPath);
 
   // Total output duration ≈ sum of clip lengths; used to turn ffmpeg's elapsed

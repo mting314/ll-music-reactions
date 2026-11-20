@@ -23,10 +23,17 @@ export type OverlayPosition = ExportRequest["overlayPosition"];
 
 // Which input stream index maps to each piece of an entry. artIdx/audioIdx are
 // null when that asset was unavailable (failed download, or none specified).
+// labelPath is an optional UTF-8 text file drawn right below the album art.
 export interface InputMap {
   clipIdx: number;
   artIdx: number | null;
   audioIdx: number | null;
+  labelPath?: string | null;
+}
+
+export interface FilterOptions {
+  /** Path to a TTF/OTF/TTC font with CJK glyphs for song-name drawtext. */
+  fontFile?: string | null;
 }
 
 const MARGIN = 20;
@@ -47,20 +54,99 @@ export function overlaySize(resolution: ExportRequest["resolution"]): number {
   return resolution === "720p" ? 180 : 120;
 }
 
+function labelMetrics(resolution: ExportRequest["resolution"]) {
+  return resolution === "720p"
+    ? { fontSize: 16, gap: 6, boxBorder: 5, lineSpacing: 3, reserveBottom: 46 }
+    : { fontSize: 11, gap: 4, boxBorder: 3, lineSpacing: 2, reserveBottom: 32 };
+}
+
+/** Approximate monospace visual width (CJK/fullwidth = 2, ASCII = 1). */
+function charWidth(ch: string): number {
+  const code = ch.codePointAt(0) ?? 0;
+  return code > 0x2e7f ? 2 : 1;
+}
+
+function visualWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) w += charWidth(ch);
+  return w;
+}
+
+/**
+ * Wrap a song title onto at most 2 compact lines sized to sit neatly beneath
+ * the square album art, breaking on whitespace when available and truncating
+ * with an ellipsis if even 2 lines exceed the visual width budget.
+ */
+export function formatSongLabel(
+  songName: string,
+  maxLineWidth: number = 18,
+): string {
+  const clean = songName.trim().replace(/\s+/g, " ");
+  if (!clean) return "";
+  if (visualWidth(clean) <= maxLineWidth) return clean;
+
+  const chars = Array.from(clean);
+  // Find the split index for line 1 within maxLineWidth, preferring a space.
+  let w = 0;
+  let splitIdx = 0;
+  let lastSpace = -1;
+  for (let i = 0; i < chars.length; i++) {
+    const cw = charWidth(chars[i]!);
+    if (w + cw > maxLineWidth) break;
+    w += cw;
+    splitIdx = i + 1;
+    if (chars[i] === " ") lastSpace = i;
+  }
+
+  let line1: string;
+  let rest: string;
+  if (lastSpace > 0 && lastSpace >= Math.floor(splitIdx * 0.45)) {
+    line1 = chars.slice(0, lastSpace).join("").trim();
+    rest = chars.slice(lastSpace + 1).join("").trim();
+  } else {
+    line1 = chars.slice(0, Math.max(1, splitIdx)).join("").trim();
+    rest = chars.slice(Math.max(1, splitIdx)).join("").trim();
+  }
+
+  if (!rest) return line1;
+  if (visualWidth(rest) <= maxLineWidth) return `${line1}\n${rest}`;
+
+  // Truncate line 2 with "…" so it never overflows the album-art column.
+  let w2 = 0;
+  let cut = 0;
+  const restChars = Array.from(rest);
+  const budget = Math.max(2, maxLineWidth - 2);
+  for (let i = 0; i < restChars.length; i++) {
+    const cw = charWidth(restChars[i]!);
+    if (w2 + cw > budget) break;
+    w2 += cw;
+    cut = i + 1;
+  }
+  const line2 = restChars.slice(0, cut).join("").trimEnd() + "…";
+  return `${line1}\n${line2}`;
+}
+
+/** Escape a file path for FFmpeg filter option values (colons & backslashes). */
+function escapeFilterPath(p: string): string {
+  return p.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+}
+
 export function overlayCoords(
   position: OverlayPosition,
   size: number,
   margin: number = MARGIN,
+  bottomReserve: number = 0,
 ): { x: string; y: string } {
+  const bottomOffset = size + margin + bottomReserve;
   switch (position) {
     case "top-right":
       return { x: `W-${size}-${margin}`, y: String(margin) };
     case "bottom-right":
-      return { x: `W-${size}-${margin}`, y: `H-${size}-${margin}` };
+      return { x: `W-${size}-${margin}`, y: `H-${bottomOffset}` };
     case "top-left":
       return { x: String(margin), y: String(margin) };
     case "bottom-left":
-      return { x: String(margin), y: `H-${size}-${margin}` };
+      return { x: String(margin), y: `H-${bottomOffset}` };
   }
 }
 
@@ -68,10 +154,11 @@ export function overlayCoords(
 export function buildFilterComplex(
   req: ExportRequest,
   inputMap: InputMap[],
+  options: FilterOptions = {},
 ): string {
   const scale = resolutionScale(req.resolution);
   const size = overlaySize(req.resolution);
-  const { x: overlayX, y: overlayY } = overlayCoords(req.overlayPosition, size);
+  const lm = labelMetrics(req.resolution);
 
   const filterParts: string[] = [];
   const concatInputs: string[] = [];
@@ -79,6 +166,17 @@ export function buildFilterComplex(
   for (let i = 0; i < req.entries.length; i++) {
     const map = inputMap[i]!;
     const entry = req.entries[i]!;
+    const hasLabel = Boolean(map.labelPath);
+    const isBottom =
+      req.overlayPosition === "bottom-left" ||
+      req.overlayPosition === "bottom-right";
+    const bottomReserve = hasLabel && isBottom ? lm.reserveBottom : 0;
+    const { x: overlayX, y: overlayY } = overlayCoords(
+      req.overlayPosition,
+      size,
+      MARGIN,
+      bottomReserve,
+    );
 
     // Scale to cover the target frame and center-crop so every clip fills the
     // canvas without black bars and the album-art corner stays rock-steady
@@ -87,15 +185,37 @@ export function buildFilterComplex(
       `[${map.clipIdx}:v]scale=${scale}:force_original_aspect_ratio=increase,crop=${scale},setsar=1[scaled${i}]`,
     );
 
+    let videoLabel = `scaled${i}`;
     if (map.artIdx !== null) {
       filterParts.push(
         `[${map.artIdx}:v]scale=${size}:${size}[artscaled${i}]`,
       );
+      const nextLabel = hasLabel ? `artov${i}` : `v${i}`;
       filterParts.push(
-        `[scaled${i}][artscaled${i}]overlay=${overlayX}:${overlayY}[v${i}]`,
+        `[${videoLabel}][artscaled${i}]overlay=${overlayX}:${overlayY}[${nextLabel}]`,
       );
-    } else {
-      filterParts.push(`[scaled${i}]copy[v${i}]`);
+      videoLabel = nextLabel;
+    }
+
+    if (hasLabel && map.labelPath) {
+      const half = Math.round(size / 2);
+      const isRight =
+        req.overlayPosition === "top-right" ||
+        req.overlayPosition === "bottom-right";
+      const centerX = isRight ? `W-${MARGIN + half}` : String(MARGIN + half);
+      // Center under the album art while clamping inside the frame edges
+      const textX = `min(max(${centerX}-tw/2\\,10)\\,W-tw-10)`;
+      const textY = isBottom
+        ? `H-${MARGIN + bottomReserve - lm.gap}`
+        : String(MARGIN + size + lm.gap);
+      const fontArg = options.fontFile
+        ? `fontfile=${escapeFilterPath(options.fontFile)}:`
+        : "";
+      filterParts.push(
+        `[${videoLabel}]drawtext=${fontArg}textfile=${escapeFilterPath(map.labelPath)}:fontsize=${lm.fontSize}:fontcolor=white:borderw=2:bordercolor=black@0.85:box=1:boxcolor=black@0.55:boxborderw=${lm.boxBorder}:line_spacing=${lm.lineSpacing}:x=${textX}:y=${textY}[v${i}]`,
+      );
+    } else if (map.artIdx === null) {
+      filterParts.push(`[${videoLabel}]copy[v${i}]`);
     }
 
     // Normalize every audio stream to one format before concat. ffmpeg's
