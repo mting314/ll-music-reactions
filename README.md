@@ -10,7 +10,7 @@ A web app for creating Love Live music reaction meme videos. Match songs from th
 - **Drag-and-Drop Timeline** — Arrange clip+song pairs in sequence
 - **Setlist Loader** — Load concert setlists (720 performances) as templates
 - **Video Preview** — Play through your sequence with album art corner overlay
-- **Cloud FFmpeg Export** — Video stitching runs on a Cloud Run service (ffmpeg in a container). Discord-optimized (<25MB MP4)
+- **Client-Side MP4 Export** — Video stitching runs 100% in your browser via WebCodecs (`VideoEncoder` + `AudioEncoder`) and `mp4-muxer` — no export server required
 
 ## Tech Stack
 
@@ -18,7 +18,7 @@ A web app for creating Love Live music reaction meme videos. Match songs from th
 - Vite 6
 - Tailwind CSS 4
 - @dnd-kit (drag-and-drop)
-- Bun + ffmpeg on Cloud Run (server-side video encoding)
+- WebCodecs + Canvas2D + `mp4-muxer` (client-side H.264/AAC MP4 encoding)
 - wanakana (Japanese text conversion)
 
 ## Getting Started
@@ -30,35 +30,9 @@ bun dev
 
 Add reaction clips to `public/clips/` and thumbnails to `public/thumbnails/`, matching filenames in `src/data/clips-manifest.json`.
 
-## Export Service (Cloud Run)
+## Browser Video Export
 
-Video stitching is handled by `server/export.ts` (Bun + ffmpeg), deployed to Google Cloud Run. Reaction clips are bundled into the container image; album art and song audio are fetched at request time.
-
-```bash
-# Run the export server locally (used when VITE_EXPORT_API is unset)
-bun run server        # listens on http://localhost:3001
-
-# Unit tests for the ffmpeg argument builder
-bun test server/
-
-# Deploy / redeploy to Cloud Run (builds via Cloud Build, no local Docker needed)
-gcloud run deploy ll-export --source . --region us-central1 \
-  --allow-unauthenticated --memory 1Gi --timeout 300 --port 8080
-```
-
-The frontend targets the export service via `VITE_EXPORT_API`:
-
-- **Development** (`bun dev`) — unset, falls back to `http://localhost:3001`
-- **Production** (`bun run build`) — read from `.env.production` (the Cloud Run URL)
-
-Endpoints:
-
-- `POST /export` — streams **Server-Sent Events** with real progress while it
-  works (`start` → `asset` per entry → `ffmpeg_start` → `ffmpeg_progress` →
-  `done`), delivering the finished MP4 as base64 in the final `done` event.
-  Errors arrive as an `error` event. Running the work inside the streamed
-  request keeps Cloud Run's CPU allocated and avoids any shared job state.
-- `GET /health` — readiness check.
+Video compositing and MP4 encoding run entirely client-side in [`src/utils/clientExport.ts`](src/utils/clientExport.ts) using WebCodecs (`VideoEncoder` + `AudioEncoder`), Canvas2D (1:1 square cover-crop, album art, and CJK song-name labels), and `mp4-muxer`. Works in Chrome, Edge, Safari 16.4+, and Firefox 130+ with zero server dependencies or COOP/COEP headers.
 
 ## Data
 

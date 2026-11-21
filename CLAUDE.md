@@ -77,15 +77,16 @@ Firestore + Cloud Run data-API + mirror-Action chain.)
 
 ### Video export
 
-`server/export.ts` (Bun + ffmpeg) → Cloud Run service `ll-export`
-(`VITE_EXPORT_API`). Streams SSE progress; returns a Discord-sized MP4.
+100% client-side in the browser via WebCodecs (`VideoEncoder` + `AudioEncoder`),
+Canvas2D, and `mp4-muxer`: `src/utils/clientExport.ts` + pure layout/audio
+helpers in `src/utils/videoLayout.ts`, wired through `src/hooks/useVideoExport.ts`.
+No export server or COOP/COEP headers required.
 
 ## Project structure
 
 ```
 src/            frontend (components/, hooks/, context/, data/, utils/, types/)
 pipeline/       Cloud Run daily-refresh job: scrape → build → publish JSON
-server/         ffmpeg video-export service (Bun)
 docs/           architecture notes (e.g. saving-builds.md)
 ```
 (The separate **ll-music-data** repo holds the published per-entity JSON, served
@@ -94,11 +95,12 @@ by GitHub Pages — the CDN the frontend reads. The pipeline job pushes to it.)
 ## Conventions
 
 - TS strict; import alias **`@/` → `src/`**.
-- **Tests:** `*.test.ts` colocated in `src/` (and `server/`, `pipeline/`), run by
+- **Tests:** `*.test.ts` colocated in `src/` (and `pipeline/`), run by
   `bun test`. They are **excluded from `tsc`** (tsconfig `exclude`) because
   `bun:test` types aren't wired into the app tsconfig. **No DOM/component testing
   is set up** — extract pure logic into testable functions and unit-test those
-  (e.g. `utils/filters.ts`, `useSavedProjects` helpers, `fetchDataset`).
+  (e.g. `utils/filters.ts`, `utils/videoLayout.ts`, `useSavedProjects` helpers,
+  `fetchDataset`).
 - Match existing Tailwind styling (dark theme: `#0f0f1e` / `#1a1a2e`, pink-600
   accents).
 
@@ -108,8 +110,7 @@ by GitHub Pages — the CDN the frontend reads. The pipeline job pushes to it.)
 - CI (`.github/workflows/ci.yml`) gates PRs on lint + typecheck + test + build.
 - **Squash-merge**; pushing to `main` auto-deploys the frontend to GitHub Pages
   (`deploy.yml`). The build needs no network and bundles no data.
-- The Cloud Run **data API** and **export** services deploy separately via
-  `gcloud run deploy --source <dir>` (not in CI).
+- The Cloud Run **pipeline** job deploys separately via `gcloud` (not in CI).
 - Established habit this repo: run a **code review on the diff before merging**
   features, fix findings, then merge.
 
@@ -133,12 +134,3 @@ by GitHub Pages — the CDN the frontend reads. The pipeline job pushes to it.)
 - GitHub Pages forces `Cache-Control: max-age=600` on the data files (can't set
   `no-cache`) — fine for once-daily data; ~10-min propagation after a refresh.
 - GCP project: `future-name-201021` (= project number 278890546984).
-- **Export server + Cloud Run IPv6 egress:** Cloud Run has **no public IPv6
-  egress** by default. The album-art host `m.media-amazon.com` is dual-stack
-  (8 AAAA vs 1 A); without forcing IPv4, `fetch` connects to an unroutable IPv6
-  address and **hangs forever** (the audio host `static.wikia.nocookie.net` is
-  IPv4-only, so audio never hit this). Fix in `server/export.ts`:
-  `setDefaultResultOrder("ipv4first")` + a per-asset `AbortController` timeout
-  (consume the body via `arrayBuffer()`, not `Bun.write(dest, resp)` — the latter
-  ignores the abort and keeps the hang). Logs `export.asset.fetch_start` before
-  each download so an in-flight stall shows its URL.
